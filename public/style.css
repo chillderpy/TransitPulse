@@ -343,6 +343,16 @@ button:hover { opacity: 0.9; }
 .pill-high, .pill-disrupted { color: var(--danger); border-color: var(--danger); }
 .pill-unknown { color: var(--muted); }
 
+.advisory {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+.advisory-medium { color: var(--warning); border-color: var(--warning); }
+
 .list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
 .list li {
   background: var(--panel);

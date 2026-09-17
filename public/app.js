@@ -325,10 +325,57 @@ function presetDepartAtIso(preset) {
 }
 
 const TIME_CONTEXT_ICONS = { amPeak: "🌅", pmPeak: "🌇", night: "🌙", offPeak: "🕐" };
+const DEPART_PRESET_LABELS = {
+  amPeak: "Morning peak",
+  pmPeak: "Evening peak",
+  offPeak: "Midday off-peak",
+  night: "Late night",
+};
+
+let lastRerouteResult = null;
+
+// The API labels a picked-on-map point as "Your location" rather than
+// returning its coordinates, since that's meant as a display label, not
+// an identifier - fine for showing the route just planned, but useless
+// for saving (every pin would collapse to the same name and "Show" would
+// have nothing to route back to). Fall back to the raw "lat,lon" string
+// that was actually submitted so the saved route still points somewhere.
+function saveableEndpoint(resolvedLabel, rawInput) {
+  return resolvedLabel === "Your location" ? rawInput : resolvedLabel;
+}
+
+async function saveCurrentRoute() {
+  if (!lastRerouteResult) return;
+  const btn = document.getElementById("save-route-btn");
+  const originStation = saveableEndpoint(lastRerouteResult.originStation, lastRerouteResult.requestOrigin);
+  const destinationStation = saveableEndpoint(lastRerouteResult.destinationStation, lastRerouteResult.requestDestination);
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+  try {
+    await callApi("/api/saved-routes", {
+      method: "POST",
+      headers: { "x-device-id": getDeviceId() },
+      body: JSON.stringify({
+        name: `${originStation} → ${destinationStation}`,
+        originStation,
+        destinationStation,
+        persona: lastRerouteResult.requestPersona,
+        ...(lastRerouteResult.requestDepartPreset ? { departPreset: lastRerouteResult.requestDepartPreset } : {}),
+      }),
+    });
+    btn.textContent = "Saved ✓";
+    loadSavedRoutes();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = "Save this route";
+    document.getElementById("save-route-error").textContent = userFacingMessage(err.message);
+  }
+}
 
 async function submitReroute(origin, destination, persona, departPreset, mockDisruption) {
   const el = document.getElementById("result-reroute");
   el.textContent = "Loading…";
+  lastRerouteResult = null;
   try {
     const departAt = presetDepartAtIso(departPreset);
     const data = await callApi("/api/reroute", {
@@ -348,6 +395,13 @@ async function submitReroute(origin, destination, persona, departPreset, mockDis
       .map((w) => `<div class="pill pill-disrupted" style="display:block;margin-top:6px">${escapeHtml(w)}</div>`)
       .join("");
     const timeIcon = TIME_CONTEXT_ICONS[data.timeContext?.period] || "🕐";
+    lastRerouteResult = {
+      ...data,
+      requestOrigin: origin,
+      requestDestination: destination,
+      requestPersona: persona || "standard",
+      requestDepartPreset: departPreset || null,
+    };
     el.innerHTML = `
       <div class="summary-row">
         <div><b>${data.confidenceRangeMinutes.min}–${data.confidenceRangeMinutes.max} min</b>estimated</div>
@@ -367,9 +421,13 @@ async function submitReroute(origin, destination, persona, departPreset, mockDis
           : ""
       }
       <ul class="steps" style="margin-top:12px">${stepsHtml}</ul>
+      <button type="button" id="save-route-btn" style="margin-top:12px">Save this route</button>
+      <div id="save-route-error" class="error" style="display:inline-block;margin-left:8px"></div>
     `;
+    document.getElementById("save-route-btn").addEventListener("click", saveCurrentRoute);
     drawRoute(data);
   } catch (err) {
+    lastRerouteResult = null;
     showError(el, err);
   }
 }
@@ -450,7 +508,7 @@ document.getElementById("btn-alerts").addEventListener("click", async () => {
   try {
     const data = await callApi("/api/train-alerts");
     const advisoriesHtml = (data.generalAdvisories || [])
-      .map((m) => `<div class="pill pill-medium" style="display:block;margin-bottom:6px">${escapeHtml(m)}</div>`)
+      .map((m) => `<div class="advisory advisory-medium">${escapeHtml(m)}</div>`)
       .join("");
     if (data.overallStatus === "normal") {
       el.innerHTML = `<span class="pill pill-normal">All lines normal</span>${advisoriesHtml ? `<div style="margin-top:10px">${advisoriesHtml}</div>` : ""}`;
@@ -548,6 +606,7 @@ async function loadSavedRoutes() {
           <div>
             <div><b>${escapeHtml(r.name)}</b></div>
             <div class="hint">${escapeHtml(r.originStation)} → ${escapeHtml(r.destinationStation)}</div>
+            <div class="hint">${r.persona === "accessible" ? "Accessibility-first" : "Standard"}${r.departPreset ? ` · ${DEPART_PRESET_LABELS[r.departPreset] || r.departPreset}` : ""}</div>
           </div>
           <div class="list-actions">
             <button type="button" data-show="${r.id}">Show</button>
@@ -575,7 +634,9 @@ async function loadSavedRoutes() {
         setActiveTab("reroute");
         document.getElementById("input-origin").value = route.originStation;
         document.getElementById("input-destination").value = route.destinationStation;
-        submitReroute(route.originStation, route.destinationStation);
+        document.getElementById("input-persona").value = route.persona || "standard";
+        document.getElementById("input-depart-at").value = route.departPreset || "";
+        submitReroute(route.originStation, route.destinationStation, route.persona, route.departPreset);
       });
     });
   } catch (err) {

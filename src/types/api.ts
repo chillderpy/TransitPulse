@@ -64,11 +64,15 @@ export interface CrowdReportInput {
   level: "low" | "medium" | "high";
 }
 
+export type DepartPreset = "amPeak" | "pmPeak" | "offPeak" | "night";
+
 export interface SavedRouteInput {
   ownerId: string;
   name?: string;
   originStation: string;
   destinationStation: string;
+  persona?: Persona;
+  departPreset?: DepartPreset;
 }
 
 export interface SavedRouteDto {
@@ -77,6 +81,8 @@ export interface SavedRouteDto {
   name: string;
   originStation: string;
   destinationStation: string;
+  persona: Persona;
+  departPreset: DepartPreset | null;
   createdAt: string;
 }
 

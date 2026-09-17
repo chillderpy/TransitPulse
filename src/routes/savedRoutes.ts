@@ -34,6 +34,8 @@ const createSchema = z.object({
   name: z.string().optional(),
   originStation: z.string().min(1),
   destinationStation: z.string().min(1),
+  persona: z.enum(["standard", "accessible"]).optional(),
+  departPreset: z.enum(["amPeak", "pmPeak", "offPeak", "night"]).optional(),
 });
 
 savedRoutesRouter.get(

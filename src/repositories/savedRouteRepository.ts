@@ -30,6 +30,8 @@ class SavedRouteRepository {
       name: input.name?.trim() || `${input.originStation} to ${input.destinationStation}`,
       originStation: input.originStation,
       destinationStation: input.destinationStation,
+      persona: input.persona ?? "standard",
+      departPreset: input.departPreset ?? null,
       createdAt: new Date().toISOString(),
     };
     this.routes.set(id, route);
