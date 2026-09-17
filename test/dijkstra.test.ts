@@ -10,7 +10,7 @@ describe("shortestPath", () => {
     const result = shortestPath(EDGES, "NS1", "EW23");
     expect(result).not.toBeNull();
     expect(result!.path).toEqual(["NS1", "EW23"]);
-    expect(result!.totalMinutes).toBe(2.5);
+    expect(result!.totalMinutes).toBe(4); // real EWL running time, Clementi <-> Jurong East
   });
 
   it("finds a multi-hop route across the network", () => {

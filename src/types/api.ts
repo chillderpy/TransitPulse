@@ -81,6 +81,8 @@ export interface RouteStepDto {
   station: string;
   mode: "origin" | "walk" | "bus" | "train" | "destination";
   note: string;
+  lat: number;
+  lon: number;
 }
 
 export interface RerouteSuggestionDto {

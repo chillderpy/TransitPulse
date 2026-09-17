@@ -1,6 +1,6 @@
 import { RerouteSuggestionDto, RouteStepDto } from "../types/api";
 import { TrainAlertsDto } from "../types/api";
-import { EDGES, findStationCode, stationName, StationEdge } from "./graph";
+import { EDGES, findStationCode, stationName, stationCoords, StationEdge } from "./graph";
 import { shortestPath, PathResult } from "./dijkstra";
 
 /**
@@ -75,7 +75,8 @@ function buildSteps(result: PathResult): RouteStepDto[] {
     } else if (result.linesUsed[i - 1] !== result.linesUsed[i]) {
       note = `Interchange to ${result.linesUsed[i]} line`;
     }
-    return { order: i + 1, station: stationName(code), mode, note };
+    const { lat, lon } = stationCoords(code);
+    return { order: i + 1, station: stationName(code), mode, note, lat, lon };
   });
 }
 
@@ -95,14 +96,14 @@ export class StaticGraphRoutePlanner implements RoutePlanner {
             !destination ? destinationInput : null,
           ]
             .filter(Boolean)
-            .join(", ")}. This planner only covers MRT stations (LRT is ` +
-          `out of scope) - see src/routing/graph.ts for the full list.`,
+            .join(", ")}. This MVP planner only covers a small sample of ` +
+          `interchange stations - see src/routing/graph.ts.`,
       };
     }
 
     const usual = shortestPath(EDGES, origin, destination);
     if (!usual) {
-      return { error: "No route found between these stations in the rail network." };
+      return { error: "No route found between these stations in the sample graph." };
     }
 
     const { edges: liveEdges, blockedLines } = edgesAvoidingDisruptedLines(alerts);
