@@ -41,10 +41,14 @@ describe("StaticGraphRoutePlanner", () => {
     if ("error" in result) return;
     expect(result.disruptionReason).toContain("EWL");
     expect(result.deltaMinutes).toBeGreaterThan(0);
-    expect(result.steps.some((s) => s.station === "Clementi")).toBe(false);
+    // The alert only names the Buona Vista <-> Commonwealth segment, so that's
+    // the one edge that gets cut - Commonwealth becomes unreachable without
+    // backtracking and drops out of the route, while Clementi (upstream of the
+    // cut) still lies on the detour.
+    expect(result.steps.some((s) => s.station === "Commonwealth")).toBe(false);
   });
 
-  it("reports an error for a station outside the sample graph", () => {
+  it("reports an error for a station outside the MRT network", () => {
     const result = planner.suggest("Jurong East", "Somewhere Fictional", noAlerts);
     expect("error" in result).toBe(true);
   });

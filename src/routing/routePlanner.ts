@@ -95,14 +95,14 @@ export class StaticGraphRoutePlanner implements RoutePlanner {
             !destination ? destinationInput : null,
           ]
             .filter(Boolean)
-            .join(", ")}. This MVP planner only covers a small sample of ` +
-          `interchange stations - see src/routing/graph.ts.`,
+            .join(", ")}. This planner only covers MRT stations (LRT is ` +
+          `out of scope) - see src/routing/graph.ts for the full list.`,
       };
     }
 
     const usual = shortestPath(EDGES, origin, destination);
     if (!usual) {
-      return { error: "No route found between these stations in the sample graph." };
+      return { error: "No route found between these stations in the rail network." };
     }
 
     const { edges: liveEdges, blockedLines } = edgesAvoidingDisruptedLines(alerts);
