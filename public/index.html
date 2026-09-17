@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TransitPulse</title>
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="map"></div>
+
+  <div class="overlay-panel" id="overlay-panel">
+    <header class="topbar">
+      <div class="brand">TransitPulse</div>
+      <div id="health-badge" class="badge badge-unknown hidden"></div>
+      <button id="panel-toggle" class="icon-btn" title="Collapse panel" aria-label="Collapse panel">&laquo;</button>
+    </header>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="reroute">Reroute</button>
+      <button class="tab" data-tab="arrivals">Bus arrivals</button>
+      <button class="tab" data-tab="alerts">Train alerts</button>
+      <button class="tab" data-tab="crowding">Crowding</button>
+      <button class="tab" data-tab="saved">Saved routes</button>
+    </nav>
+
+    <main>
+      <!-- Reroute -->
+      <section class="panel active" id="panel-reroute">
+        <p class="hint">Click stations on the map to fill origin/destination, type a station name, enter a door-to-door point as "lat,lon" (e.g. 1.3335,103.7430), or use "Pick on map" and click anywhere.</p>
+        <form id="form-reroute" class="col">
+          <label>Origin
+            <div class="input-with-button">
+              <input name="origin" id="input-origin" value="Jurong East" required />
+              <button type="button" class="pick-btn" id="pick-origin" title="Pick origin by clicking the map" aria-label="Pick origin by clicking the map">📍</button>
+            </div>
+          </label>
+          <label>Destination
+            <div class="input-with-button">
+              <input name="destination" id="input-destination" value="Raffles Place" required />
+              <button type="button" class="pick-btn" id="pick-destination" title="Pick destination by clicking the map" aria-label="Pick destination by clicking the map">📍</button>
+            </div>
+          </label>
+          <label>Persona
+            <select name="persona" id="input-persona">
+              <option value="standard">Standard</option>
+              <option value="accessible">Accessibility-first (shorter walks, flags lift outages)</option>
+            </select>
+          </label>
+          <label>Depart
+            <select name="departAt" id="input-depart-at">
+              <option value="">Now</option>
+              <option value="amPeak">Morning peak (8:00am)</option>
+              <option value="pmPeak">Evening peak (6:30pm)</option>
+              <option value="offPeak">Midday off-peak (1:00pm)</option>
+              <option value="night">Late night (12:30am)</option>
+            </select>
+          </label>
+          <label>Simulate disruption <span class="hint">(demo only - requires ENABLE_MOCK_DISRUPTIONS=true on the server)</span>
+            <select name="mockDisruption" id="input-mock-disruption">
+              <option value="">None (live LTA data)</option>
+              <option value="ewlBuonaVista">EWL disrupted (Clementi – Commonwealth)</option>
+              <option value="cclBuonaVistaHollandVillage">CCL disrupted (Buona Vista – Holland Village)</option>
+              <option value="twoLinesEwlCcl">EWL + CCL both disrupted</option>
+              <option value="networkWideOutage">Network-wide outage (all lines)</option>
+            </select>
+          </label>
+          <button type="submit">Get route</button>
+        </form>
+        <div id="result-reroute" class="result" role="status" aria-live="polite"></div>
+      </section>
+
+      <!-- Bus arrivals -->
+      <section class="panel" id="panel-arrivals">
+        <p class="hint">Enter a bus stop code to see live arrival times, e.g. 83139. Live buses (when reported) are plotted on the map.</p>
+        <form id="form-arrivals" class="col">
+          <label>Bus stop code <input name="busStopCode" placeholder="83139" pattern="\d{5}" required /></label>
+          <label>Service no (optional) <input name="serviceNo" placeholder="15" /></label>
+          <button type="submit">Get arrivals</button>
+        </form>
+        <div id="result-arrivals" class="result" role="status" aria-live="polite"></div>
+      </section>
+
+      <!-- Train alerts -->
+      <section class="panel" id="panel-alerts">
+        <p class="hint">Check current MRT service status across all lines.</p>
+        <button id="btn-alerts">Refresh alerts</button>
+        <div id="result-alerts" class="result" role="status" aria-live="polite"></div>
+      </section>
+
+      <!-- Crowding -->
+      <section class="panel" id="panel-crowding">
+        <p class="hint">See live and forecasted platform crowding, plus reports from other commuters. Checked stations are highlighted on the map.</p>
+        <form id="form-crowding" class="col">
+          <label>Station <input name="station" id="input-crowding-station" value="Jurong East" required /></label>
+          <button type="submit">Check crowding</button>
+        </form>
+        <div id="result-crowding" class="result" role="status" aria-live="polite"></div>
+
+        <h3>Report crowding here</h3>
+        <form id="form-report" class="col">
+          <label>Station <input name="station" value="Jurong East" required /></label>
+          <label>Level
+            <select name="level">
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+          <button type="submit">Submit report</button>
+        </form>
+        <div id="result-report" class="result" role="status" aria-live="polite"></div>
+      </section>
+
+      <!-- Saved routes -->
+      <section class="panel" id="panel-saved">
+        <p class="hint">Routes you save are kept on this device.</p>
+        <form id="form-saved" class="col">
+          <label>Name (optional) <input name="name" placeholder="Home to work" /></label>
+          <label>Origin <input name="originStation" value="Jurong East" required /></label>
+          <label>Destination <input name="destinationStation" value="Raffles Place" required /></label>
+          <button type="submit">Save route</button>
+        </form>
+        <ul id="saved-list" class="list"></ul>
+      </section>
+    </main>
+  </div>
+
+  <button id="panel-reopen" class="icon-btn panel-reopen hidden" title="Show panel" aria-label="Show panel">&raquo;</button>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="vendor/protomaps-leaflet/protomaps-leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

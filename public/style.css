@@ -1,0 +1,452 @@
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel-translucent: rgba(23, 26, 33, 0.96);
+  --border: #2a2e38;
+  --text: #e8eaed;
+  --muted: #8b90a0;
+  --accent: #4f8cff;
+  --danger: #ff5c5c;
+  --success: #2fbf71;
+  --warning: #e6a53c;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+* { -webkit-tap-highlight-color: transparent; }
+
+.hidden { display: none; }
+
+html, body {
+  margin: 0;
+  /* dvh tracks the *actual* visible viewport as a mobile browser's address
+     bar/toolbar shows and hides on scroll - 100% (of the layout viewport)
+     leaves a gap or clips content as that chrome animates in and out. */
+  height: 100vh;
+  height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ---- map fills the whole viewport, like Google Maps ---- */
+#map {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  background: #aad3df;
+}
+
+/* Leaflet div icons used for stations/buses */
+.station-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.bus-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--warning);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.walk-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--success);
+  border: 2px dashed #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.cycle-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: #8e5cff;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.crowd-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+}
+.endpoint-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+}
+.endpoint-origin { background: var(--success); }
+.endpoint-destination { background: var(--danger); }
+.crowd-low { background: var(--success); }
+.crowd-moderate, .crowd-medium { background: var(--warning); }
+.crowd-high { background: var(--danger); }
+.crowd-unknown { background: var(--muted); }
+
+/* ---- route comparison legend (live vs usual vs avoided) ---- */
+.route-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin: 10px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.route-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { display: inline-block; width: 14px; height: 4px; border-radius: 2px; flex-shrink: 0; }
+.swatch-live { background: var(--warning); }
+.swatch-usual { background: var(--muted); opacity: 0.7; }
+.swatch-avoided { background: var(--danger); }
+
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+  background: var(--panel);
+  color: var(--text);
+}
+.popup-actions { display: flex; gap: 6px; margin-top: 6px; }
+.popup-actions button {
+  font-size: 12px;
+  padding: 4px 8px;
+  height: auto;
+}
+
+/* ---- floating control panel, Google-Maps style ---- */
+.overlay-panel {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  bottom: 16px;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  background: var(--panel-translucent);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  backdrop-filter: blur(6px);
+  transition: transform 0.2s ease, opacity 0.2s ease;
+  z-index: 1000;
+}
+.overlay-panel.collapsed {
+  transform: translateX(calc(-100% - 24px));
+  opacity: 0;
+  pointer-events: none;
+}
+
+.panel-reopen {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 1000;
+}
+.panel-reopen.hidden { display: none; }
+
+.icon-btn {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 8px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.icon-btn:hover { opacity: 0.85; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+#panel-toggle {
+  margin-left: auto;
+}
+
+.brand { font-size: 16px; font-weight: 600; white-space: nowrap; }
+.muted { color: var(--muted); font-weight: 400; font-size: 13px; }
+
+.badge {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  flex: 1;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.badge-ok { color: var(--success); border-color: var(--success); }
+.badge-warn { color: var(--warning); border-color: var(--warning); }
+.badge-down { color: var(--danger); border-color: var(--danger); }
+.badge-unknown { color: var(--muted); }
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 8px 0;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.tab {
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 12px 12px;
+  min-height: 44px;
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+main {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.panel { display: none; }
+.panel.active { display: block; }
+
+h3 { margin-top: 24px; margin-bottom: 10px; font-size: 14px; }
+
+.hint { color: var(--muted); font-size: 12px; margin-top: 0; }
+
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+input, select {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 10px;
+  border-radius: 6px;
+  /* 16px minimum keeps iOS Safari from auto-zooming the page on focus. */
+  font-size: 16px;
+  min-height: 44px;
+  width: 100%;
+}
+
+.input-with-button {
+  display: flex;
+  gap: 6px;
+}
+.input-with-button input { flex: 1; }
+.pick-btn {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 6px;
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.pick-btn:hover { opacity: 0.85; }
+.pick-btn.active {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+#map.picking { cursor: crosshair; }
+
+button {
+  background: var(--accent);
+  color: white;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 15px;
+  cursor: pointer;
+  min-height: 44px;
+}
+button:hover { opacity: 0.9; }
+
+.result {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  min-height: 20px;
+  font-size: 13px;
+}
+.result:empty { display: none; }
+
+.result .error { color: var(--danger); }
+.result .note { color: var(--muted); font-size: 12px; margin-top: 6px; }
+
+.steps { list-style: none; padding: 0; margin: 0; }
+.steps li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.steps li:last-child { border-bottom: none; }
+
+.summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.summary-row b { display: block; font-size: 17px; }
+
+.pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+}
+.pill-low, .pill-normal { color: var(--success); border-color: var(--success); }
+.pill-moderate, .pill-medium { color: var(--warning); border-color: var(--warning); }
+.pill-high, .pill-disrupted { color: var(--danger); border-color: var(--danger); }
+.pill-unknown { color: var(--muted); }
+
+.list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.list li {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  gap: 8px;
+}
+.list li .list-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.list li button {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  height: 36px;
+  min-height: 36px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.list li button.remove {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+code {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+/* ---- mobile: a bottom sheet, not a shrunk-down desktop side panel ----
+   On a phone the map is the thing you're looking at (a moving train, one
+   thumb) so the controls live in a sheet anchored to the bottom edge -
+   reachable with a thumb, collapsible to a peek strip, and never covering
+   more of the map than the current tab actually needs. */
+@media (max-width: 640px) {
+  .overlay-panel {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-width: 100%;
+    max-height: 72dvh;
+    border-radius: 16px 16px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+  .overlay-panel.collapsed {
+    /* Slide down out of view instead of sideways - the reopen affordance
+       then makes sense sitting at the bottom, not stranded top-left. */
+    transform: translateY(calc(100% + 24px));
+  }
+
+  /* A visible grab handle signals "this sheet moves" even though the
+     collapse control is a tap target, not a drag gesture. */
+  .topbar { position: relative; padding-top: 18px; }
+  .topbar::before {
+    content: "";
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+  }
+
+  .panel-reopen {
+    top: auto;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0));
+    left: 50%;
+    transform: translateX(-50%);
+    width: auto;
+    padding: 0 16px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .panel-reopen::after {
+    content: "Show route panel";
+    font-size: 13px;
+  }
+
+  .tabs { padding: 4px 4px 0; }
+  .tab { padding: 12px 10px; font-size: 12px; }
+
+  main { padding: 12px; }
+
+  .summary-row { gap: 10px 16px; }
+  .summary-row b { font-size: 16px; }
+}
+
+/* Landscape phones (short viewport height): a tall bottom sheet would eat
+   the whole screen, so cap it lower and let the map stay visible above it. */
+@media (max-width: 900px) and (max-height: 450px) and (orientation: landscape) {
+  .overlay-panel { max-height: 85dvh; width: 340px; }
+}
