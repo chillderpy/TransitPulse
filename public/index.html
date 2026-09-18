@@ -67,10 +67,11 @@
               <option value="night">Late night (12:30am)</option>
             </select>
           </label>
-          <label>Simulate disruption <span class="hint">(demo only - requires ENABLE_MOCK_DISRUPTIONS=true on the server)</span>
+          <label id="mock-disruption-field" class="hidden">Simulate disruption <span class="hint">(demo only - requires ENABLE_MOCK_DISRUPTIONS=true on the server)</span>
             <select name="mockDisruption" id="input-mock-disruption">
               <option value="">None (live LTA data)</option>
               <option value="ewlBuonaVista">EWL disrupted (Clementi – Commonwealth)</option>
+              <option value="ewlPayaLebarBugis">EWL disrupted (Paya Lebar – Bugis)</option>
               <option value="cclBuonaVistaHollandVillage">CCL disrupted (Buona Vista – Holland Village)</option>
               <option value="twoLinesEwlCcl">EWL + CCL both disrupted</option>
               <option value="networkWideOutage">Network-wide outage (all lines)</option>

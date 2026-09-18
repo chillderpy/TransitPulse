@@ -330,13 +330,19 @@ function pillClass(level) {
 // readout.
 async function refreshHealth() {
   const badge = document.getElementById("health-badge");
+  const mockDisruptionField = document.getElementById("mock-disruption-field");
   try {
-    await callApi("/health");
+    const data = await callApi("/health");
     badge.textContent = "";
     badge.className = "badge badge-unknown hidden";
+    // Stays hidden unless the server actually has ENABLE_MOCK_DISRUPTIONS=true -
+    // showing a control that would just 400 on submit is worse than not
+    // showing it, and a real deployment normally has this off (see env.ts).
+    mockDisruptionField.classList.toggle("hidden", !data.mockDisruptionsEnabled);
   } catch (err) {
     badge.textContent = "Can't connect right now";
     badge.className = "badge badge-down";
+    mockDisruptionField.classList.add("hidden");
   }
 }
 refreshHealth();

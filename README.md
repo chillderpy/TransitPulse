@@ -1,18 +1,13 @@
-# TransitPulse Backend
+# TransitPulse
 
 Node.js/TypeScript API that wraps LTA DataMall's live datasets (bus arrivals,
 train service alerts, platform crowd density) plus app-side state the app
 needs but LTA doesn't provide (saved routes, crowdsourced crowding reports,
-a disruption-aware reroute suggestion). It's built to replace the Flutter
-prototype's hardcoded mock data with a real backend, and it also serves the
-mobile-first web front end (`public/`) that a commuter opens in their phone's
-browser — see [What to click first](#what-to-click-first) below.
+a disruption-aware reroute suggestion). It also serves a mobile-first web
+front end (`public/`) directly from this server — see
+[What to click first](#what-to-click-first) below.
 
 ## Demo
-
-<!-- PASTE THE DEMO VIDEO LINK HERE before submitting. Record the screen of
-     an actual phone (or a phone-sized browser window) walking one real
-     journey through one real disruption, per PS2's submission README §6. -->
 
 📺 **Demo video:** _TODO — add link here_
 
@@ -42,12 +37,12 @@ degrades to "assume no known disruptions") all work so you can develop the
 app against it before you have a key. `/api/arrivals`, `/api/train-alerts`,
 and the live half of `/api/crowding` return `503` until the key is set.
 
-### Opening it on a real phone (this is a mobile-first web app)
+### Opening it on a real phone
 
-PS2 is judged in a **mobile browser on a real phone**, not a resized desktop
-window, so don't just check `localhost:3000` in a desktop tab. The server
-listens on all network interfaces, so any device on the same Wi-Fi can reach
-it directly — no tunnel or extra config needed:
+This is a mobile-first web app, so it's worth checking on an actual phone
+rather than only a resized desktop window. The server listens on all network
+interfaces, so any device on the same Wi-Fi can reach it directly — no
+tunnel or extra config needed:
 
 ```bash
 # find your machine's LAN IP
@@ -59,34 +54,26 @@ ipconfig
 
 Then, on your phone (same Wi-Fi network), open `http://<that-ip>:3000` in
 its browser. If you need to test from a different network (e.g. cellular)
-or want a shareable HTTPS link for judges, tunnel the port instead:
+or want a shareable HTTPS link, tunnel the port instead:
 
 ```bash
 npx localtunnel --port 3000
 # or: ngrok http 3000
 ```
 
-The page already ships a `width=device-width, initial-scale=1` viewport and
-same-origin static assets, so no extra setup is needed beyond reaching the
-right URL from the phone.
-
 ## What to click first
 
 Open `http://localhost:3000` (or `http://<lan-ip>:3000` on a phone — see
 above) after `npm run dev`. The **Reroute** tab is the golden path — it's
-already pre-filled with Rachel's persona journey (Jurong East → Raffles
-Place, EWL). Press **Get route** to see a live, disruption-aware itinerary
-rendered on the map, with the usual route shown alongside the live one and
-any avoided segment highlighted. Switch the persona dropdown to
-**Accessibility-first** to see the same journey re-planned with a shorter
-walk-in radius and lift-outage warnings for Mdm Lim.
+pre-filled with Rachel's persona journey (Jurong East → Raffles Place).
+Press **Get route** to see a live, disruption-aware itinerary rendered on
+the map, with the usual route shown alongside the live one and any avoided
+segment highlighted. Switch the persona dropdown to **Accessibility-first**
+to see the same journey re-planned with a shorter walk-in radius and
+lift-outage warnings for Mdm Lim.
 
-**Note on the front end:** `public/` is a functional, mobile-reachable
-console over every required capability (routing, GIS map, visualisation),
-not yet a persona-styled one-screen product — see `WRITEUP.md`'s
-Limitations section for why, and the other tabs (bus arrivals, train
-alerts, crowding, saved routes) are debugging views over the same API
-rather than a separate product.
+The other tabs (bus arrivals, train alerts, crowding, saved routes) are
+straightforward forms over the corresponding API endpoint below.
 
 ## Endpoints
 

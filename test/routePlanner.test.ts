@@ -15,6 +15,7 @@ const noAlerts: TrainAlertsDto = {
 // param serves (src/services/mockDisruptions.ts), so the fixtures backing
 // these tests and the ones a demo actually clicks through never drift apart.
 const ewlDisruptedAtBuonaVista = MOCK_DISRUPTION_SCENARIOS.ewlBuonaVista;
+const ewlDisruptedPayaLebarBugis = MOCK_DISRUPTION_SCENARIOS.ewlPayaLebarBugis;
 
 // A fixed, deterministic "leave now" for tests that don't care about
 // time-of-day effects but still need rail AND buses to be running - using
@@ -102,6 +103,29 @@ describe("StaticGraphRoutePlanner", () => {
     if ("error" in result) return;
     expect(result.deltaMinutes).toBe(0);
     expect(result.disruptionReason).toBeNull();
+  });
+
+  it("reroutes Rachel's actual Tampines -> Raffles Place commute when the EWL is cut on her segment", async () => {
+    // Rachel (WRITEUP.md persona) rides Tampines -> Raffles Place on the EWL
+    // at 07:40 on a weekday. ewlBuonaVista/twoLinesEwlCcl above sit on the
+    // Jurong side of the line and never touch her route (that's exactly the
+    // "why doesn't this disruption affect my commute" case) - this scenario
+    // instead cuts the EWL across the stretch she actually rides
+    // (Paya Lebar - Bugis), so it should genuinely reroute and delay her.
+    const RACHEL_AM_PEAK = new Date("2026-09-14T07:40:00+08:00"); // Monday AM peak
+    const result = await planner.suggest("Tampines", "Raffles Place", ewlDisruptedPayaLebarBugis, {
+      busGraph: EMPTY_BUS_GRAPH,
+      departAt: RACHEL_AM_PEAK,
+    });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.disruptionReason).toContain("EWL");
+    expect(result.deltaMinutes).toBeGreaterThan(0);
+    // Paya Lebar itself stays on the route (it's where she interchanges onto
+    // the detour), but the blocked interior of the cut segment drops out.
+    for (const name of ["Aljunied", "Kallang", "Lavender", "Bugis"]) {
+      expect(result.steps.some((s) => s.station === name)).toBe(false);
+    }
   });
 
   it("does NOT block an edge when only one of its two endpoint stations is named as affected", async () => {
