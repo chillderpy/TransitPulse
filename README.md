@@ -9,7 +9,7 @@ front end (`public/`) directly from this server — see
 
 ## Demo
 
-📺 **Demo video:** [_TODO — add link here_](https://youtu.be/iGDjul3ArM4)
+📺 **Demo video:** [https://youtu.be/iGDjul3ArM4]
 
 ## Prerequisites
 
