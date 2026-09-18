@@ -1,5 +1,18 @@
 const API = ""; // same origin - this page is served by the backend itself
 
+// Render's free tier can take 30-60s to cold-boot the backend after it's
+// spun down from idling - long enough that a short abort would misreport a
+// perfectly healthy (just slow) server as "no connection". HARD_TIMEOUT_MS
+// (used by callApi, defined below) is set past that worst case for
+// genuinely hung requests; WAKING_HINT_MS is how long a call is allowed to
+// run before the connectivity banner switches to a reassuring "waking up"
+// message instead of just going quiet. Declared here at the top of the
+// script, not next to callApi further down, because loadStations() runs at
+// top level before that point in the file and would otherwise hit these
+// consts' temporal dead zone.
+const HARD_TIMEOUT_MS = 55000;
+const WAKING_HINT_MS = 4000;
+
 // ==================== map setup ====================
 const map = L.map("map", { zoomControl: false }).setView([1.3521, 103.8198], 12);
 L.control.zoom({ position: "topright" }).addTo(map);
@@ -37,13 +50,22 @@ async function pmtilesUrlExists(url) {
 
 async function findRecentPmtilesUrl(maxDaysBack = 14) {
   const today = new Date();
-  for (let i = 0; i < maxDaysBack; i++) {
+  const candidates = Array.from({ length: maxDaysBack }, (_, i) => {
     const date = new Date(today);
     date.setUTCDate(date.getUTCDate() - i);
-    const url = pmtilesUrlForDate(date);
-    if (await pmtilesUrlExists(url)) return url;
-  }
-  return null;
+    return pmtilesUrlForDate(date);
+  });
+  // Probed in parallel rather than one-at-a-time-await: a systemic failure
+  // (e.g. Protomaps' CDN serving every dated build with a stale cached
+  // Access-Control-Allow-Origin header pinned to some other origin) used to
+  // mean waiting out up to maxDaysBack sequential failed fetches before
+  // falling back to raster tiles - the map looked broken/disconnected for
+  // several extra seconds for no benefit, since a same-cause failure on one
+  // date doesn't make an older date any more likely to work. Firing them
+  // together costs one round trip instead of maxDaysBack.
+  const exists = await Promise.all(candidates.map(pmtilesUrlExists));
+  const firstOkIndex = exists.findIndex(Boolean);
+  return firstOkIndex === -1 ? null : candidates[firstOkIndex];
 }
 
 (async function initBasemap() {
@@ -221,13 +243,36 @@ function getDeviceId() {
 // A fixed pill above the map, shown on the `offline` window event, on a
 // fetch that couldn't reach the server at all (callApi below), or if the
 // page loads already offline - and hidden again on `online` or the next
-// successful callApi() call.
+// successful callApi() call. Also doubles as a "waking up" notice (see
+// WAKING_HINT_MS below) for Render's free tier, which spins the backend
+// down after ~15min idle - the first request after that can take 30-60s to
+// cold-boot, and without this a slow-but-fine server looked identical to a
+// genuinely dead one.
 const connectivityBanner = document.getElementById("connectivity-banner");
 let isOffline = false;
+let wakingCalls = 0; // count, not bool - concurrent callApi() calls at page load can overlap
+function renderConnectivityBanner() {
+  if (isOffline) {
+    connectivityBanner.textContent = "No connection — showing last known info";
+    connectivityBanner.classList.remove("waking");
+    connectivityBanner.classList.remove("hidden");
+  } else if (wakingCalls > 0) {
+    connectivityBanner.textContent = "Waking up the server — this can take up to a minute…";
+    connectivityBanner.classList.add("waking");
+    connectivityBanner.classList.remove("hidden");
+  } else {
+    connectivityBanner.classList.remove("waking");
+    connectivityBanner.classList.add("hidden");
+  }
+}
 function setOffline(offline) {
   if (offline === isOffline) return;
   isOffline = offline;
-  connectivityBanner.classList.toggle("hidden", !offline);
+  renderConnectivityBanner();
+}
+function setWaking(waking) {
+  wakingCalls += waking ? 1 : -1;
+  renderConnectivityBanner();
 }
 window.addEventListener("online", () => setOffline(false));
 window.addEventListener("offline", () => setOffline(true));
@@ -276,7 +321,12 @@ async function callApi(path, options = {}) {
   // A hung request on a flaky tunnel connection would otherwise leave
   // "Loading…" on screen forever - abort and treat it the same as offline.
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  const timeoutId = setTimeout(() => controller.abort(), HARD_TIMEOUT_MS);
+  let wokeWakingBanner = false;
+  const wakingTimer = setTimeout(() => {
+    wokeWakingBanner = true;
+    setWaking(true);
+  }, WAKING_HINT_MS);
   let res;
   try {
     res = await fetch(API + path, {
@@ -289,6 +339,8 @@ async function callApi(path, options = {}) {
     throw new NetworkError(err.name === "AbortError" ? "Request timed out." : "Couldn't reach the server.");
   } finally {
     clearTimeout(timeoutId);
+    clearTimeout(wakingTimer);
+    if (wokeWakingBanner) setWaking(false);
   }
   setOffline(false);
   const isJson = (res.headers.get("content-type") || "").includes("application/json");
