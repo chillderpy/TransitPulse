@@ -26,7 +26,7 @@ npm install
 cp .env.example .env
 # edit .env and set LTA_ACCOUNT_KEY (register at
 # https://datamall.lta.gov.sg/content/datamall/en/request-for-api.html)
-npm run dev      # ts-node dev server with reload, http://localhost:3000
+npm run dev      # tsx watch dev server with reload, http://localhost:3000
 npm test         # vitest
 npm run build && npm start   # production build
 ```
@@ -61,6 +61,27 @@ npx localtunnel --port 3000
 # or: ngrok http 3000
 ```
 
+## Deploying to Render
+
+`render.yaml` defines this as a single Render **web service** (build:
+`npm install && npm run build`, start: `npm start`) - Render's "New +
+Blueprint" flow (Dashboard → New → Blueprint, pointing at this repo) picks
+it up directly. It pre-sets `CORS_ORIGIN=*` and
+`ENABLE_MOCK_DISRUPTIONS=false`; `LTA_ACCOUNT_KEY` is marked `sync: false`,
+so you still need to set it yourself under the service's Environment tab
+(without it, the deployed app behaves exactly like running locally with no
+key - see above). `PORT` doesn't need setting - Render injects its own and
+`src/config/env.ts` already reads `process.env.PORT`.
+
+**Free-tier cold starts.** On Render's free plan the service spins down
+after ~15 minutes idle, and the next request can take 30-60s to cold-boot.
+The frontend accounts for this: `callApi()` in `public/app.js` uses a 55s
+request timeout (long enough to survive a cold start, instead of a short
+timeout misreporting a merely-slow server as "no connection") and shows a
+"Waking up the server…" banner after 4s of waiting so the delay doesn't
+look like a hang. Deploying on a plan without spin-down just means that
+banner rarely appears.
+
 ## What to click first
 
 Open `http://localhost:3000` (or `http://<lan-ip>:3000` on a phone — see
@@ -79,26 +100,29 @@ straightforward forms over the corresponding API endpoint below.
 
 | Method & path | Source | Notes |
 |---|---|---|
-| `GET /health` | - | liveness + whether an LTA key is configured |
+| `GET /health` | - | liveness, whether an LTA key is configured, and whether mock-disruption demo scenarios are enabled |
 | `GET /api/arrivals/bus/:busStopCode?serviceNo=` | LTA Bus Arrival | real per-bus ETA, load, wheelchair access |
 | `GET /api/train-alerts` | LTA Train Service Alerts | current disruption status per line |
 | `GET /api/crowding?trainLine=NSL&station=Jurong+East` | LTA PCDRealTime + PCDForecast + our own reports | live level, forecast, and any active crowdsourced reports for that station |
 | `POST /api/crowding/report` `{station, level}` | ours | crowdsourced report, expires after 15 min |
 | `GET /api/saved-routes` (header `X-Device-Id`) | ours | list a device's saved routes |
-| `POST /api/saved-routes` `{originStation, destinationStation, name?}` | ours | save a route |
+| `POST /api/saved-routes` `{originStation, destinationStation, name?, persona?, departPreset?}` | ours | save a route |
 | `DELETE /api/saved-routes/:id` | ours | remove a saved route |
-| `POST /api/reroute` `{origin, destination, persona?}` | ours + live alerts + LTA buses/lifts + data.gov.sg weather | disruption-aware, persona-weighted, door-to-door, multi-modal (rail+bus+walk) route suggestion (see below) |
+| `POST /api/reroute` `{origin, destination, persona?, departAt?, mockDisruption?}` | ours + live alerts + LTA buses/lifts + data.gov.sg weather | disruption- and crowding-aware, persona-weighted, time-of-day-aware, door-to-door, multi-modal (rail+bus+cycle+walk) route suggestion, returning up to 3 ranked alternatives (see below) |
 | `GET /api/disruptions/planned?roadName=` | LTA RoadWorks | active planned roadworks, as a signal distinct from live incident status |
 | `POST /api/notifications/subscribe` `{webhookUrl, lines?, stations?}` | ours | registers a webhook for proactive disruption/lift-outage alerts (see below) |
 | `DELETE /api/notifications/subscribe/:id` | ours | removes a webhook subscription |
 
-### Reroute: door-to-door, multi-modal (rail+bus+walk), persona-aware
+### Reroute: door-to-door, multi-modal (rail+bus+cycle+walk), persona-aware
 
 `origin`/`destination` each accept either a station name/code ("Jurong
 East", "NS1") **or** a bare `"lat,lon"` pair, so a journey can start/end at
 an arbitrary door rather than only at a platform. A coordinate input walks
 to any station *or bus stop* within 1200m (600m for the `accessible`
-persona); the response includes each walking leg's distance and time.
+persona), and additionally offers cycling out to 3000m (standard persona
+only - accessible mode is about reducing physical effort, so it skips
+cycling) whenever that beats walking; the response includes each
+walking/cycling leg's distance and time.
 
 Routing runs Dijkstra (a binary-heap implementation - the graph is
 thousands of nodes once bus stops are joined in, where the earlier linear
@@ -119,8 +143,44 @@ seconds** while it loads; every request after that (within the 6h window)
 is fast. If it's unavailable at all (no LTA key, network error), routing
 just degrades to rail+walk only rather than failing the request.
 
+**Multiple ranked alternatives.** Rather than one "optimal" suggestion, the
+response's `routes` array holds up to 3 distinct, ranked (fastest-first)
+route options, found via Yen's k-shortest-paths algorithm
+(`src/routing/multiRouteDijkstra.ts`) run on top of the same Dijkstra core -
+a commuter facing a disruption is choosing between several new options, not
+comparing old-vs-new. Top-level fields (`totalMinutes`, `steps`, etc.)
+mirror `routes[0]` for callers that only want a single suggestion.
+
+**Crowding-aware, not just disruption-aware.** Live per-station platform
+crowding (the same `PCDRealTime`/`PCDForecast`-derived data `/api/crowding`
+exposes) adds a boarding-cost penalty at highly/moderately crowded
+platforms, so the optimizer can choose to board a line one stop
+earlier/later - or a different line entirely - when that's worth it. When
+this changes the route taken, that option's `crowdingReason` explains why,
+distinct from `disruptionReason` (which is about outages).
+
+**Time-of-day aware.** An optional `departAt` (ISO 8601 timestamp,
+defaulting to "now") drives peak/off-peak/night classification
+(`src/routing/timeOfDay.ts`): rush-hour rail gets a small dwell-time
+markup and shorter waits, buses slow down more under peak road traffic,
+and late-night journeys use wider train/bus headways. Outside MRT/bus
+operating hours, routing degrades to whichever mode(s) are actually
+running and `serviceHoursNote` explains why; the response's `timeContext`
+reports which period was used.
+
+**Demo-only disruption simulation.** With `ENABLE_MOCK_DISRUPTIONS=true` in
+the environment (off by default, so a real deployment can't have its
+disruption data spoofed by a caller), `POST /api/reroute` also accepts a
+`mockDisruption` scenario name - see `src/services/mockDisruptions.ts` for
+the full list (e.g. `ewlBuonaVista`, `ewlPayaLebarBugis`,
+`twoLinesEwlCcl`, `networkWideOutage`) - which feeds the planner canned
+alert data instead of a live LTA fetch, so the reroute engine's disruption
+handling can be shown on demand rather than waiting for (or faking) a real
+MRT incident. The frontend's "Simulate disruption" dropdown only appears
+when `GET /health` reports `mockDisruptionsEnabled: true`.
+
 `persona` is `"standard"` (default) or `"accessible"`. Accessible mode
-shortens the walk-in radius and cross-references the live
+shortens the walk-in radius, skips cycling, and cross-references the live
 `v2/FacilitiesMaintenance` feed (which lists lifts currently out of service,
 not a maintenance schedule, despite its name) against every station on the
 route, surfacing an `accessibilityWarnings` entry for each one.
@@ -221,10 +281,20 @@ everything else this backend consumes.
 - `src/routing/busGraph.ts` - the lazily-built, 6h-cached bus-stop graph
   (`BusStops` + `BusRoutes`, joined to rail via transfer walk edges).
 - `src/routing/dijkstra.ts` - binary-heap Dijkstra (needed once the bus
-  graph's thousands of nodes are merged in) + `RoutePlanner` interface.
-- `src/routing/routePlanner.ts` - merges the rail and bus graphs per
-  request, resolves station/coordinate endpoints, and builds the
-  rider-facing itinerary (collapsing same-line hops into one "ride" step).
+  graph's thousands of nodes are merged in), boarding-wait/line-continuation
+  cost model, and the shared adjacency-map builder `multiRouteDijkstra.ts`
+  also uses.
+- `src/routing/multiRouteDijkstra.ts` - Yen's k-shortest-paths algorithm on
+  top of `dijkstra.ts`'s single-path search, returning up to k distinct,
+  ranked route alternatives instead of one.
+- `src/routing/timeOfDay.ts` - peak/off-peak/night classification (Singapore
+  local time), the resulting speed/wait multipliers, and first/last-train
+  and first/last-bus service-hours cutoffs.
+- `src/routing/routePlanner.ts` - defines the `RoutePlanner` interface,
+  merges the rail and bus graphs per request, resolves station/coordinate
+  endpoints, applies the crowding-boarding penalty, and builds the
+  rider-facing itinerary (collapsing same-line hops into one "ride" step)
+  for each of the ranked route options.
 - `src/repositories/*` - saved routes (file-backed, see above),
   crowdsourced crowding reports and notification subscriptions
   (in-memory), each behind a small interface.
@@ -237,3 +307,5 @@ everything else this backend consumes.
   `/api/disruptions/planned` respectively.
 - `src/services/notificationService.ts` - the proactive-alert poller
   described above.
+- `src/services/mockDisruptions.ts` - canned `TrainAlertsDto` fixtures for
+  the demo-only `mockDisruption` reroute param described above.
