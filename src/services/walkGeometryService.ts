@@ -19,7 +19,7 @@ const REQUEST_TIMEOUT_MS = 4000;
 // something that needs to react to live conditions.
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-export type WalkCycleProfile = "foot" | "bike";
+export type WalkCycleProfile = "foot" | "bike" | "driving";
 
 interface CacheEntry {
   points: Array<[number, number]> | null;

@@ -1,4 +1,4 @@
-import { CrowdLevelDto, Persona, RerouteSuggestionDto, RouteStepDto } from "../types/api";
+import { CrowdLevelDto, Persona, RerouteSuggestionDto, RouteOptionDto, RouteStepDto } from "../types/api";
 import { TrainAlertsDto } from "../types/api";
 import {
   CYCLE_METERS_PER_MINUTE,
@@ -13,6 +13,7 @@ import {
   WALK_METERS_PER_MINUTE,
 } from "./graph";
 import { shortestPath, PathResult } from "./dijkstra";
+import { kShortestPaths } from "./multiRouteDijkstra";
 import { BusGraph, busStopCoords, busStopLabel, findNearestBusStops, getBusGraph } from "./busGraph";
 import { LiftOutageDto, liftOutagesForStation } from "../services/facilitiesService";
 import { WeatherAdvisoryDto } from "../services/weatherService";
@@ -67,6 +68,12 @@ const CROWDING_BOARDING_PENALTY_MINUTES: Record<CrowdLevelDto, number> = {
 };
 const EMPTY_BUS_GRAPH: BusGraph = { stops: new Map(), edges: [], builtAt: 0 };
 
+// A commuter facing a disruption is being offered a choice between new
+// optimal routes, not "old route vs new route" - this many ranked,
+// meaningfully distinct disruption-aware alternatives are computed and
+// returned for them to pick between (see RerouteSuggestionDto.routes).
+const MAX_ROUTE_OPTIONS = 3;
+
 export interface SuggestOptions {
   persona?: Persona;
   liftOutages?: LiftOutageDto[];
@@ -101,6 +108,43 @@ export interface RoutePlanner {
   ): Promise<RerouteSuggestionDto | { error: string }>;
 }
 
+function edgeKey(e: StationEdge): string {
+  return `${e.line}|${e.from}|${e.to}`;
+}
+
+/**
+ * Shortest path (by hop count) between two nodes in a single line's
+ * subgraph, as the sequence of edges taken. Used to find every station a
+ * disruption's named endpoints actually span, including stations the alert
+ * doesn't name (see edgesAvoidingDisruptedLines).
+ */
+function bfsPath(adjacency: Map<string, StationEdge[]>, start: string, goal: string): StationEdge[] {
+  if (start === goal) return [];
+  const cameFrom = new Map<string, StationEdge>();
+  const visited = new Set<string>([start]);
+  const queue: string[] = [start];
+  while (queue.length > 0) {
+    const node = queue.shift()!;
+    for (const edge of adjacency.get(node) ?? []) {
+      if (visited.has(edge.to)) continue;
+      visited.add(edge.to);
+      cameFrom.set(edge.to, edge);
+      if (edge.to === goal) {
+        const path: StationEdge[] = [];
+        let cur = goal;
+        while (cur !== start) {
+          const step = cameFrom.get(cur)!;
+          path.push(step);
+          cur = step.from;
+        }
+        return path.reverse();
+      }
+      queue.push(edge.to);
+    }
+  }
+  return [];
+}
+
 function edgesAvoidingDisruptedLines(alerts: TrainAlertsDto): {
   edges: StationEdge[];
   blockedLines: string[];
@@ -109,31 +153,82 @@ function edgesAvoidingDisruptedLines(alerts: TrainAlertsDto): {
   if (disruptedLines.length === 0) return { edges: EDGES, blockedLines: [] };
 
   const blockedLines: string[] = [];
-  const edges = EDGES.filter((edge) => {
-    if (edge.line === "WALK" || edge.line === "CYCLE" || edge.line.startsWith("BUS:")) return true;
-    const matching = disruptedLines.find((d) =>
-      d.line.toUpperCase().includes(edgeLineFullName(edge.line))
-    );
-    if (!matching) return true;
-    // Only treat the edge as blocked if the alert names both endpoint
-    // stations as affected - a line-wide "disrupted" flag without station
-    // detail still fully blocks, since we can't tell which segment.
-    const namedStations = matching.affectedStations.map((s) => s.toUpperCase());
-    const bothNamed =
-      namedStations.length === 0 ||
-      (namedStations.some((s) => s.includes(stationName(edge.from).toUpperCase())) &&
-        namedStations.some((s) => s.includes(stationName(edge.to).toUpperCase())));
-    if (bothNamed) {
-      if (!blockedLines.includes(edge.line)) blockedLines.push(edge.line);
-      return false;
+  const blockedEdgeKeys = new Set<string>();
+  const blockEdges = (blocked: Iterable<StationEdge>) => {
+    for (const e of blocked) {
+      // EDGES stores each hop as two directed entries; a path found by BFS
+      // only walks one direction, so block both or the reverse trip through
+      // the same disrupted stations stays open.
+      blockedEdgeKeys.add(edgeKey(e));
+      blockedEdgeKeys.add(edgeKey({ ...e, from: e.to, to: e.from }));
+      if (!blockedLines.includes(e.line)) blockedLines.push(e.line);
     }
-    return true;
-  });
+  };
 
+  for (const matching of disruptedLines) {
+    const lineEdges = EDGES.filter((e) =>
+      matching.line.toUpperCase().includes(edgeLineFullName(e.line))
+    );
+    if (lineEdges.length === 0) continue;
+
+    const namedStations = matching.affectedStations.map((s) => s.toUpperCase());
+    if (namedStations.length === 0) {
+      // No station-level detail at all - we can't tell which segment, so
+      // the whole line is treated as blocked.
+      blockEdges(lineEdges);
+      continue;
+    }
+
+    const codesOnLine = new Set<string>();
+    for (const e of lineEdges) {
+      codesOnLine.add(e.from);
+      codesOnLine.add(e.to);
+    }
+    const namedCodes = [...codesOnLine].filter((code) =>
+      namedStations.some((s) => s.includes(stationName(code).toUpperCase()))
+    );
+
+    if (namedCodes.length < 2) {
+      // Fewer than two named stations on this line means there's no span to
+      // compute - fall back to the conservative "both endpoints named" rule
+      // (in practice this blocks nothing, since an edge needs two named
+      // endpoints and we only have zero or one).
+      blockEdges(
+        lineEdges.filter(
+          (e) =>
+            namedStations.some((s) => s.includes(stationName(e.from).toUpperCase())) &&
+            namedStations.some((s) => s.includes(stationName(e.to).toUpperCase()))
+        )
+      );
+      continue;
+    }
+
+    // Block every edge on the path between any two named stations, not just
+    // edges whose own two endpoints happen to both be named - an alert that
+    // names only the two ends of a disrupted stretch (e.g. "Clementi and
+    // Commonwealth") still fully blocks the stations in between (e.g.
+    // Dover) that it never mentions by name.
+    const adjacency = new Map<string, StationEdge[]>();
+    for (const e of lineEdges) {
+      if (!adjacency.has(e.from)) adjacency.set(e.from, []);
+      adjacency.get(e.from)!.push(e);
+    }
+    for (let i = 0; i < namedCodes.length; i++) {
+      for (let j = i + 1; j < namedCodes.length; j++) {
+        blockEdges(bfsPath(adjacency, namedCodes[i], namedCodes[j]));
+      }
+    }
+  }
+
+  const edges = EDGES.filter((edge) => !blockedEdgeKeys.has(edgeKey(edge)));
   return { edges, blockedLines };
 }
 
-const LINE_FULL_NAMES: Record<string, string> = {
+// Exported so mockDisruptions.ts's networkWideOutage scenario can build
+// alert.line values edgesAvoidingDisruptedLines will actually match,
+// instead of duplicating this mapping (and risking it drifting out of
+// sync, as happened when that scenario used bare line codes instead).
+export const LINE_FULL_NAMES: Record<string, string> = {
   NSL: "NORTH-SOUTH",
   EWL: "EAST-WEST",
   CCL: "CIRCLE",
@@ -350,12 +445,17 @@ function buildSteps(
 
 /**
  * Turns a PathResult into the [lat, lon] polyline the map draws, with every
- * WALK/CYCLE hop traced along real street/path geometry instead of a
- * straight line between its two endpoints - train and bus hops are left
- * as-is, since those already follow the real, physical sequence of
- * stations/stops (see fetchWalkCycleGeometry's own comment for why this
- * only affects display, never the route's timing). Hops are fetched in
- * parallel since a route rarely has more than one or two walk/cycle legs.
+ * WALK/CYCLE/bus hop traced along real street/path geometry instead of a
+ * straight line between its two endpoints. Train hops are left as-is, since
+ * rail runs on its own fixed alignment between closely-spaced stations, so a
+ * straight line between them already tracks the real line closely. Bus
+ * stops on the other hand can be far apart (e.g. either side of an
+ * expressway interchange), where the actual route loops around on-ramps
+ * rather than cutting straight across - hence bus hops get the same
+ * road-following treatment as walk/cycle (see fetchWalkCycleGeometry's own
+ * comment for why this only affects display, never the route's timing).
+ * Hops are fetched in parallel since a route rarely has more than a
+ * handful of these legs.
  */
 async function pathCoordinatesWithRoadGeometry(
   result: PathResult,
@@ -365,10 +465,12 @@ async function pathCoordinatesWithRoadGeometry(
 ): Promise<Array<[number, number]>> {
   const hopGeometries = await Promise.all(
     result.linesUsed.map((line, i) => {
-      if (line !== "WALK" && line !== "CYCLE") return Promise.resolve(null);
+      const isBus = line.startsWith("BUS:");
+      if (line !== "WALK" && line !== "CYCLE" && !isBus) return Promise.resolve(null);
       const from = nodeCoords(result.path[i], origin, destination, busGraph);
       const to = nodeCoords(result.path[i + 1], origin, destination, busGraph);
-      return fetchWalkCycleGeometry(line === "WALK" ? "foot" : "bike", from, to);
+      const profile = line === "WALK" ? "foot" : line === "CYCLE" ? "bike" : "driving";
+      return fetchWalkCycleGeometry(profile, from, to);
     })
   );
 
@@ -384,6 +486,117 @@ async function pathCoordinatesWithRoadGeometry(
     }
   }
   return points;
+}
+
+interface RouteOptionContext {
+  usual: PathResult;
+  blockedLines: string[];
+  origin: ResolvedEndpoint;
+  destination: ResolvedEndpoint;
+  busGraph: BusGraph;
+  crowding?: Map<string, CrowdLevelDto>;
+  persona: Persona;
+  liftOutages?: LiftOutageDto[];
+  originWeather?: WeatherAdvisoryDto | null;
+  destinationWeather?: WeatherAdvisoryDto | null;
+}
+
+/**
+ * Builds one fully-described, selectable route (steps, road-following
+ * polyline, disruption/crowding explanations, warnings) out of a single
+ * PathResult - the same derivation the planner used to run once for "the"
+ * route, now run once per ranked alternative so each option in
+ * RerouteSuggestionDto.routes is independently explorable rather than only
+ * the top one.
+ */
+async function buildRouteOption(id: string, live: PathResult, ctx: RouteOptionContext): Promise<RouteOptionDto> {
+  const { usual, blockedLines, origin, destination, busGraph, crowding, persona, liftOutages, originWeather, destinationWeather } = ctx;
+
+  const trainLinesUsed = new Set(live.linesUsed.filter((l) => l !== "WALK" && l !== "CYCLE"));
+  const transfers = Math.max(0, trainLinesUsed.size - 1);
+  const disrupted = blockedLines.length > 0 && live.totalMinutes !== usual.totalMinutes;
+
+  const roundedTotalMinutes = Math.round(live.totalMinutes * 10) / 10;
+  const bufferMinutes = Math.max(1, Math.round(roundedTotalMinutes * 0.15));
+  const confidenceRangeMinutes = {
+    min: Math.floor(roundedTotalMinutes),
+    max: Math.ceil(roundedTotalMinutes + bufferMinutes),
+  };
+
+  let crowdingReason: string | null = null;
+  if (crowding && live.path !== usual.path) {
+    const isHighCrowd = (node: string) => crowding.get(node.toUpperCase()) === "high";
+    const highCrowdOnUsual = usual.path.filter(
+      (n, idx) => idx > 0 && idx < usual.path.length - 1 && isHighCrowd(n)
+    );
+    const avoided = highCrowdOnUsual.filter((n) => !live.path.includes(n));
+    if (avoided.length > 0) {
+      const names = [...new Set(avoided.map((n) => nodeLabelForCode(n, busGraph)))];
+      crowdingReason = `Adjusted to avoid high platform crowding at ${names.join(", ")}`;
+    }
+  }
+
+  const avoidedSegments: Array<[[number, number], [number, number]]> = [];
+  if (disrupted) {
+    for (let i = 0; i < usual.path.length - 1; i++) {
+      const line = usual.linesUsed[i];
+      if (blockedLines.includes(line) && !live.path.includes(usual.path[i + 1])) {
+        const from = nodeCoords(usual.path[i], origin, destination, busGraph);
+        const to = nodeCoords(usual.path[i + 1], origin, destination, busGraph);
+        avoidedSegments.push([[from.lat, from.lon], [to.lat, to.lon]]);
+      }
+    }
+  }
+
+  const accessibilityWarnings: string[] = [];
+  if (persona === "accessible" && liftOutages?.length) {
+    for (const node of live.path) {
+      if (node === endpointGraphNode(origin) || node === endpointGraphNode(destination)) continue;
+      const outages = liftOutagesForStation(liftOutages, node);
+      for (const outage of outages) {
+        accessibilityWarnings.push(`Lift out of service at ${stationName(node)}: ${outage.liftDescription}`);
+      }
+    }
+  }
+
+  let maxWalkMeters = 0;
+  for (let i = 1; i < live.path.length; i++) {
+    if (live.linesUsed[i - 1] !== "WALK" && live.linesUsed[i - 1] !== "CYCLE") continue;
+    const a = nodeCoords(live.path[i - 1], origin, destination, busGraph);
+    const b = nodeCoords(live.path[i], origin, destination, busGraph);
+    maxWalkMeters = Math.max(maxWalkMeters, haversineMeters(a.lat, a.lon, b.lat, b.lon));
+  }
+
+  let weatherAdvisory: RouteOptionDto["weatherAdvisory"] = null;
+  if (maxWalkMeters >= WALK_ADVISORY_THRESHOLD_METERS) {
+    const rainy = [originWeather, destinationWeather].find((w) => w?.rainLikely);
+    if (rainy) {
+      weatherAdvisory = {
+        area: rainy.area,
+        forecast: rainy.forecast,
+        message: `${rainy.forecast} near ${rainy.area} - allow extra time for the walking leg of this trip.`,
+      };
+    }
+  }
+
+  const livePath = await pathCoordinatesWithRoadGeometry(live, origin, destination, busGraph);
+
+  return {
+    id,
+    totalMinutes: roundedTotalMinutes,
+    deltaMinutes: Math.round((live.totalMinutes - usual.totalMinutes) * 10) / 10,
+    confidenceRangeMinutes,
+    transfers,
+    disruptionReason: disrupted
+      ? `Avoiding disruption on the ${blockedLines.join(", ")} line${blockedLines.length > 1 ? "s" : ""}`
+      : null,
+    crowdingReason,
+    steps: buildSteps(live, origin, destination, busGraph),
+    livePath,
+    avoidedSegments,
+    weatherAdvisory,
+    accessibilityWarnings,
+  };
 }
 
 export class StaticGraphRoutePlanner implements RoutePlanner {
@@ -477,92 +690,36 @@ export class StaticGraphRoutePlanner implements RoutePlanner {
       [...liveRailEdges, ...scheduledBusGraphEdges, ...originWalkEdges, ...destWalkEdges],
       departAt
     );
-    const live = shortestPath(liveEdges, originNode, destNode, liveBoardingPenalty) ?? usual;
+    // A disrupted commuter is choosing between several *new* optimal
+    // routes, not between the old route and one new one - so this finds up
+    // to MAX_ROUTE_OPTIONS distinct, ranked (fastest-first) routes on the
+    // disruption-aware graph via Yen's algorithm, instead of a single
+    // shortestPath call. "usual" (above) remains a single baseline path,
+    // kept only as shared context (usualMinutes/deltaMinutes/
+    // avoidedSegments per option) - it is never itself one of the choices
+    // offered.
+    const liveCandidates = kShortestPaths(liveEdges, originNode, destNode, MAX_ROUTE_OPTIONS, liveBoardingPenalty);
+    const liveResults = liveCandidates.length > 0 ? liveCandidates : [usual];
 
-    const trainLinesUsed = new Set(live.linesUsed.filter((l) => l !== "WALK" && l !== "CYCLE"));
-    const transfers = Math.max(0, trainLinesUsed.size - 1);
-    const disrupted = blockedLines.length > 0 && live.totalMinutes !== usual.totalMinutes;
-
-    // Modest uncertainty band rather than one confident number: live transit
-    // timing (headways, dwell time, walk pace, bus travel time itself only
-    // an average-speed estimate) always has some slop, and hiding that
-    // behind a single point estimate overstates precision. Bracketed with
-    // floor/ceil (not round) around the same rounded value reported as
-    // totalMinutes, so the range can never come in narrower than the point
-    // estimate it's supposed to surround.
-    const roundedTotalMinutes = Math.round(live.totalMinutes * 10) / 10;
-    const bufferMinutes = Math.max(1, Math.round(roundedTotalMinutes * 0.15));
-    const confidenceRangeMinutes = {
-      min: Math.floor(roundedTotalMinutes),
-      max: Math.ceil(roundedTotalMinutes + bufferMinutes),
+    const routeOptionContext: RouteOptionContext = {
+      usual,
+      blockedLines,
+      origin,
+      destination,
+      busGraph,
+      crowding,
+      persona,
+      liftOutages: options.liftOutages,
+      originWeather: options.originWeather,
+      destinationWeather: options.destinationWeather,
     };
 
-    // Explain a crowding-driven change in boarding choice the same way
-    // disruptionReason explains an outage-driven one: if the live route
-    // boards at fewer highly-crowded stations than the plain "usual" route
-    // would have, name the stations it steered clear of.
-    let crowdingReason: string | null = null;
-    if (crowding && live.path !== usual.path) {
-      const isHighCrowd = (node: string) => crowding.get(node.toUpperCase()) === "high";
-      const highCrowdOnUsual = usual.path.filter(
-        (n, idx) => idx > 0 && idx < usual.path.length - 1 && isHighCrowd(n)
-      );
-      const avoided = highCrowdOnUsual.filter((n) => !live.path.includes(n));
-      if (avoided.length > 0) {
-        const names = [...new Set(avoided.map((n) => nodeLabelForCode(n, busGraph)))];
-        crowdingReason = `Adjusted to avoid high platform crowding at ${names.join(", ")}`;
-      }
-    }
-
-    const avoidedSegments: Array<[[number, number], [number, number]]> = [];
-    if (disrupted) {
-      for (let i = 0; i < usual.path.length - 1; i++) {
-        const line = usual.linesUsed[i];
-        if (blockedLines.includes(line) && !live.path.includes(usual.path[i + 1])) {
-          const from = nodeCoords(usual.path[i], origin, destination, busGraph);
-          const to = nodeCoords(usual.path[i + 1], origin, destination, busGraph);
-          avoidedSegments.push([[from.lat, from.lon], [to.lat, to.lon]]);
-        }
-      }
-    }
-
-    const accessibilityWarnings: string[] = [];
-    if (persona === "accessible" && options.liftOutages?.length) {
-      for (const node of live.path) {
-        if (node === originNode || node === destNode) continue;
-        const outages = liftOutagesForStation(options.liftOutages, node);
-        for (const outage of outages) {
-          accessibilityWarnings.push(
-            `Lift out of service at ${stationName(node)}: ${outage.liftDescription}`
-          );
-        }
-      }
-    }
-
-    let maxWalkMeters = 0;
-    for (let i = 1; i < live.path.length; i++) {
-      if (live.linesUsed[i - 1] !== "WALK" && live.linesUsed[i - 1] !== "CYCLE") continue;
-      const a = nodeCoords(live.path[i - 1], origin, destination, busGraph);
-      const b = nodeCoords(live.path[i], origin, destination, busGraph);
-      maxWalkMeters = Math.max(maxWalkMeters, haversineMeters(a.lat, a.lon, b.lat, b.lon));
-    }
-
-    let weatherAdvisory: RerouteSuggestionDto["weatherAdvisory"] = null;
-    if (maxWalkMeters >= WALK_ADVISORY_THRESHOLD_METERS) {
-      const rainy = [options.originWeather, options.destinationWeather].find((w) => w?.rainLikely);
-      if (rainy) {
-        weatherAdvisory = {
-          area: rainy.area,
-          forecast: rainy.forecast,
-          message: `${rainy.forecast} near ${rainy.area} - allow extra time for the walking leg of this trip.`,
-        };
-      }
-    }
-
-    const [livePath, usualPath] = await Promise.all([
-      pathCoordinatesWithRoadGeometry(live, origin, destination, busGraph),
+    const [routes, usualPath] = await Promise.all([
+      Promise.all(liveResults.map((live, idx) => buildRouteOption(`option-${idx + 1}`, live, routeOptionContext))),
       pathCoordinatesWithRoadGeometry(usual, origin, destination, busGraph),
     ]);
+
+    const best = routes[0];
 
     return {
       originStation: endpointLabel(origin, busGraph),
@@ -570,21 +727,20 @@ export class StaticGraphRoutePlanner implements RoutePlanner {
       persona,
       timeContext: { period: timePeriod, label: TIME_PERIOD_LABELS[timePeriod] },
       serviceHoursNote: serviceAvailability.note,
-      totalMinutes: roundedTotalMinutes,
+      totalMinutes: best.totalMinutes,
       usualMinutes: Math.round(usual.totalMinutes * 10) / 10,
-      deltaMinutes: Math.round((live.totalMinutes - usual.totalMinutes) * 10) / 10,
-      confidenceRangeMinutes,
-      transfers,
-      disruptionReason: disrupted
-        ? `Avoiding disruption on the ${blockedLines.join(", ")} line${blockedLines.length > 1 ? "s" : ""}`
-        : null,
-      crowdingReason,
-      steps: buildSteps(live, origin, destination, busGraph),
-      livePath,
+      deltaMinutes: best.deltaMinutes,
+      confidenceRangeMinutes: best.confidenceRangeMinutes,
+      transfers: best.transfers,
+      disruptionReason: best.disruptionReason,
+      crowdingReason: best.crowdingReason,
+      steps: best.steps,
+      livePath: best.livePath,
       usualPath,
-      avoidedSegments,
-      weatherAdvisory,
-      accessibilityWarnings,
+      avoidedSegments: best.avoidedSegments,
+      weatherAdvisory: best.weatherAdvisory,
+      accessibilityWarnings: best.accessibilityWarnings,
+      routes,
     };
   }
 }

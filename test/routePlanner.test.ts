@@ -171,6 +171,38 @@ describe("StaticGraphRoutePlanner", () => {
     expect(result.disruptionReason).toBeNull();
   });
 
+  it("actually blocks disrupted lines for the network-wide outage scenario", async () => {
+    // Regression: this scenario used to build each LineDisruptionDto with
+    // `line: lineCode` (e.g. "EWL") instead of the full name (e.g.
+    // "EAST-WEST LINE") edgesAvoidingDisruptedLines() matches against, so it
+    // silently blocked nothing at all. Reuses the synthetic express-bus
+    // fixture from the "falls back onto a bus route" test above: with EWL
+    // (among the other five) genuinely blocked, the only rail line between
+    // Tuas Link and Pasir Ris is down, so the route must go via the bus
+    // bridge - before the fix, the unblocked rail path would win instead.
+    const busGraph: BusGraph = {
+      builtAt: Date.now(),
+      stops: new Map([
+        ["90001", { code: "90001", description: "Near Tuas Link", roadName: "Test Rd", lat: 1.3403, lon: 103.6368 }],
+        ["90002", { code: "90002", description: "Near Pasir Ris", roadName: "Test Rd", lat: 1.3720, lon: 103.9493 }],
+      ]),
+      edges: [
+        { from: "90001", to: "90002", line: "BUS:999", minutes: 5 },
+        { from: "90001", to: "EW33", line: "WALK", minutes: 1 },
+        { from: "EW33", to: "90001", line: "WALK", minutes: 1 },
+        { from: "90002", to: "EW1", line: "WALK", minutes: 1 },
+        { from: "EW1", to: "90002", line: "WALK", minutes: 1 },
+      ],
+    };
+    const result = await planner.suggest("Tuas Link", "Pasir Ris", MOCK_DISRUPTION_SCENARIOS.networkWideOutage, {
+      busGraph,
+      departAt: OFF_PEAK_WEEKDAY,
+    });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.steps.some((s) => s.mode === "bus" && s.note.includes("999"))).toBe(true);
+  });
+
   it("reroutes around simultaneous disruptions on two different lines", async () => {
     // EWL cut at Buona Vista<->Commonwealth (as above) AND CCL cut at Buona
     // Vista<->Holland Village - the second segment is exactly the detour the
@@ -187,6 +219,89 @@ describe("StaticGraphRoutePlanner", () => {
     expect(result.disruptionReason).toContain("EWL");
     expect(result.disruptionReason).toContain("CCL");
     expect(result.deltaMinutes).toBeGreaterThan(0);
+  });
+
+  it("offers multiple ranked, distinct routes to choose between when disrupted", async () => {
+    // The commuter is choosing between several new disruption-aware routes,
+    // not between the old route and one new one - so a disruption with more
+    // than one viable detour should come back with more than one option,
+    // fastest first, each taking a genuinely different path.
+    const result = await planner.suggest("Jurong East", "Raffles Place", ewlDisruptedAtBuonaVista, {
+      busGraph: EMPTY_BUS_GRAPH,
+      departAt: OFF_PEAK_WEEKDAY,
+    });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+
+    expect(result.routes.length).toBeGreaterThan(1);
+    expect(result.routes.length).toBeLessThanOrEqual(3);
+
+    // Fastest-first ordering.
+    for (let i = 1; i < result.routes.length; i++) {
+      expect(result.routes[i].totalMinutes).toBeGreaterThanOrEqual(result.routes[i - 1].totalMinutes);
+    }
+
+    // Every option is a genuinely different route, not the same path repeated.
+    const stationSequences = result.routes.map((r) => r.steps.map((s) => s.station).join(">"));
+    expect(new Set(stationSequences).size).toBe(result.routes.length);
+
+    // ids are stable and ordered.
+    expect(result.routes.map((r) => r.id)).toEqual(result.routes.map((_, i) => `option-${i + 1}`));
+
+    // Every option is explained as a disruption reroute, and reports a
+    // slower time than the pre-disruption baseline kept as context.
+    for (const route of result.routes) {
+      expect(route.disruptionReason).toContain("EWL");
+      expect(route.deltaMinutes).toBeGreaterThan(0);
+    }
+  });
+
+  it("mirrors the fastest route option into the top-level fields for single-route callers", async () => {
+    const result = await planner.suggest("Jurong East", "Raffles Place", ewlDisruptedAtBuonaVista, {
+      busGraph: EMPTY_BUS_GRAPH,
+      departAt: OFF_PEAK_WEEKDAY,
+    });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+
+    const fastest = result.routes[0];
+    expect(result.totalMinutes).toBe(fastest.totalMinutes);
+    expect(result.deltaMinutes).toBe(fastest.deltaMinutes);
+    expect(result.transfers).toBe(fastest.transfers);
+    expect(result.disruptionReason).toBe(fastest.disruptionReason);
+    expect(result.steps).toEqual(fastest.steps);
+    expect(result.livePath).toEqual(fastest.livePath);
+  });
+
+  it("falls back to a single route option when there is no alternate path at all", async () => {
+    // Same fully-disrupted CCL scenario used above, where the live graph has
+    // no path whatsoever and suggest() falls back to the "usual" route -
+    // with only one path in existence, there's nothing to offer a second
+    // option from, so routes should contain exactly that one fallback.
+    const cclFullyDisrupted: TrainAlertsDto = {
+      overallStatus: "disrupted",
+      generalAdvisories: [],
+      lines: [
+        {
+          line: "CIRCLE LINE",
+          lineCode: "CCL",
+          status: "disrupted",
+          affectedStations: [],
+          freeBoardingBus: true,
+          freeMrtShuttle: false,
+          messages: ["Circle Line services suspended network-wide."],
+        },
+      ],
+      fetchedAt: new Date().toISOString(),
+    };
+    const result = await planner.suggest("Tai Seng", "Bartley", cclFullyDisrupted, {
+      busGraph: EMPTY_BUS_GRAPH,
+      departAt: OFF_PEAK_WEEKDAY,
+    });
+    expect("error" in result).toBe(false);
+    if ("error" in result) return;
+    expect(result.routes).toHaveLength(1);
+    expect(result.routes[0].id).toBe("option-1");
   });
 
   it("falls back onto a bus route when the only rail line between two points is fully disrupted", async () => {

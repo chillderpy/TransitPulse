@@ -2,12 +2,22 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>TransitPulse</title>
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#0f1115" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <div id="connectivity-banner" class="connectivity-banner hidden" role="status" aria-live="polite">
+    No connection — showing last known info
+  </div>
+
   <div id="map"></div>
 
   <div class="overlay-panel" id="overlay-panel">
@@ -122,6 +132,7 @@
           <label>Destination <input name="destinationStation" value="Raffles Place" required /></label>
           <button type="submit">Save route</button>
         </form>
+        <div id="form-saved-error" class="error"></div>
         <ul id="saved-list" class="list"></ul>
       </section>
     </main>

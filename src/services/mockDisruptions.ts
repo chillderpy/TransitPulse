@@ -1,4 +1,5 @@
 import { TrainAlertsDto } from "../types/api";
+import { LINE_FULL_NAMES } from "../routing/routePlanner";
 
 // Canned TrainAlertsDto fixtures for demoing/showcasing the reroute engine's
 // disruption handling without waiting for a real MRT incident (or without an
@@ -67,7 +68,10 @@ export const MOCK_DISRUPTION_SCENARIOS = {
     overallStatus: "disrupted",
     generalAdvisories: ["Network-wide disruption drill - all lines affected."],
     lines: (["NSL", "EWL", "CCL", "DTL", "TEL", "NEL"] as const).map((lineCode) => ({
-      line: lineCode,
+      // edgesAvoidingDisruptedLines() (routePlanner.ts) matches this field
+      // against each edge's full line name (e.g. "EAST-WEST"), not the bare
+      // code - a bare "EWL" here silently blocked nothing.
+      line: `${LINE_FULL_NAMES[lineCode]} LINE`,
       lineCode,
       status: "disrupted" as const,
       affectedStations: [],

@@ -44,13 +44,23 @@ describe("app", () => {
     expect(res.status).toBe(400);
   });
 
-  it("POST /api/reroute uses the sample graph without needing an LTA key", async () => {
-    const res = await request(app)
-      .post("/api/reroute")
-      .send({ origin: "Jurong East", destination: "Raffles Place" });
-    expect(res.status).toBe(200);
-    expect(res.body.originStation).toBe("Jurong East");
-  });
+  it(
+    "POST /api/reroute uses the sample graph without needing an LTA key",
+    async () => {
+      const res = await request(app)
+        .post("/api/reroute")
+        .send({ origin: "Jurong East", destination: "Raffles Place" });
+      expect(res.status).toBe(200);
+      expect(res.body.originStation).toBe("Jurong East");
+    },
+    // This hits the real live LTA bus-stop endpoint uncached (no busGraph
+    // override, unlike routePlanner.test.ts) - a cold fetch across ~5,200
+    // stops alone measured at 3-4s, and now also runs kShortestPaths (see
+    // multiRouteDijkstra.ts) against that real graph on top of it, so the
+    // default 5s test timeout leaves too little margin for real network
+    // variance.
+    15000
+  );
 
   it("GET /api/train-alerts returns 503 when LTA_ACCOUNT_KEY is unset", async () => {
     const res = await request(app).get("/api/train-alerts");

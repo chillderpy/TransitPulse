@@ -1,61 +1,146 @@
 # TransitPulse — Write-up
 
-## 1. Persona
+## Solution Overview
 
-**Primary: Rachel, the fixed-schedule commuter** (Tampines → Raffles Place, EWL, leaves 07:40, must be at her desk by 08:45). Rachel doesn't want to plan — she wants to be told, in one call, whether today is different from every other day and what to do about it if it is. That maps directly onto this backend's core endpoint, `POST /api/reroute`: given an origin, destination and (optionally) a departure time, it returns one itinerary, a plain-language `disruptionReason` only when the live route actually differs from the usual one, and a `usualMinutes` vs `totalMinutes` comparison so the cost of today's disruption is visible at a glance rather than requiring her to compare two routes herself.
+TransitPulse is a smart commuter companion designed for Singapore's rush-hour
+commuters. It continuously monitors a commuter's usual route and, when a
+disruption affects it, immediately suggests an alternative route so the
+commuter does not have to stop and manually search for one.
 
-**Secondary: Mdm Lim, the accessibility-constrained traveller.** The same endpoint accepts `persona: "accessible"`, which shortens the walk-in radius (600m vs 1200m — see §3) and cross-references every station on the route against LTA's live lift-outage feed, surfacing an `accessibilityWarnings` entry per affected station. This is a real, working code path (see `src/routing/routePlanner.ts`), not a mockup — but it is the one persona-specific behaviour built for her, not the fuller "plan the whole trip in advance, large text, warn the day before" experience the brief describes. We chose to build one persona's journey end to end (Rachel) rather than partially serve three; Mdm Lim's support is the one extension we had concrete data (`v2/FacilitiesMaintenance`) to build honestly.
+The prototype supports the full flow from disruption detection → alternative
+route suggestion → route saving → turn-by-turn navigation, with crowding
+information and accessibility considerations integrated into the journey.
 
-We did not build for Arjun (the flexible-start, comfort-optimising persona) beyond what standard routing already gives him — the persona-weighted "speed vs comfort vs shelter" scoring layer described for him is future work (see §4).
+## Personas
 
-## 2. What this repository is
+**Rachel — Fixed-schedule commuter.** Rachel follows a regular daily route
+and wants to know immediately when something changes, without having to
+manually re-plan. Her priorities are saving time, reducing stress, staying on
+schedule, and travelling comfortably.
 
-This is the **backend** for TransitPulse: a Node.js/TypeScript/Express API that wraps LTA DataMall's live datasets and adds a disruption-aware, multi-modal reroute engine on top, plus a minimal browser-based console (`public/`) for exercising every endpoint by hand on a map. It replaces an earlier Flutter mock-data prototype; PS2 requires a mobile-first **web app**, not a native build, so the console in `public/` — not a separate mobile app — is the front end this backend is designed to serve. It is intentionally a debugging/demo console rather than a fully persona-styled mobile UI (see §5, "known limitations").
+**Mdm Lim — Accessibility-conscious commuter.** Mdm Lim wants to avoid
+routes that may be difficult to navigate and to be informed when
+accessibility issues, such as lift outages, affect her journey. The routing
+system can account for accessibility constraints and station lift
+availability.
 
-## 3. Architecture
+| | Functional | Emotional | Social |
+|---|---|---|---|
+| Rachel | Fastest time to reach work | Lazy to think how to get to work | Don't want to be judged if late |
+| | Enjoy comfort during travel | Too stressed to plan routes | Don't want to look lost finding routes |
+| | Save costs | Anxious about spending | Want to look efficient / productive |
+
+## Architecture
+
+The system uses a Node.js/TypeScript/Express backend connected to LTA
+DataMall.
 
 ```
-public/ (dev console)  →  src/app.ts (Express)  →  src/routes/*  →  src/services/*  →  src/lta/client.ts  →  LTA DataMall
-                                                                  ↘  src/routing/*  (rail graph + live bus graph, Dijkstra)
-                                                                  ↘  src/repositories/*  (saved routes, crowd reports, webhook subs)
+Frontend → Express API → Services → LTA DataMall
+                        ↘ Routing Engine
+                        ↘ Repositories
 ```
 
-- **`src/lta/client.ts`** — one fetch wrapper for every LTA DataMall call: adds the `AccountKey` header, caches per-endpoint at a TTL matched to how often LTA actually refreshes that dataset (15s bus arrivals, ~60s alerts, ~30min crowd density), and turns non-200s/network failures into typed errors the route layer maps to proper HTTP codes (`503` not configured, `502` upstream failure).
-- **`src/routing/graph.ts`** — the real Singapore heavy-rail network (NSL/EWL/CCL/DTL/TEL/NEL, including the three Circle Line Stage 6 stations that opened 12 Jul 2026), with per-hop running times taken from LTA's own published station-running-time line diagrams rather than a flat per-line average (so, e.g., most Circle Line hops are 2 min but Botanic Gardens–Caldecott, which has no intermediate station, is 5 min).
-- **`src/routing/busGraph.ts`** — a live bus-stop graph built lazily from LTA's `BusStops` and `BusRoutes` endpoints and cached for 6 hours, joined to the rail network via walk-transfer edges wherever a bus stop sits within 300m of a station. On a live pull against the account key configured for this project (2026-09-17) this returned on the order of 5,200 stops and 27,000 route-stop entries — an observed figure from that pull, not a documented LTA constant, and it will drift as the network changes.
-- **`src/routing/dijkstra.ts`** — a binary-heap Dijkstra over `(node, arrival-line)` state, so continuing the same bus/train is free but switching lines or starting fresh costs a boarding wait. The state-space size is why this needed a heap rather than the linear-scan approach that's fine for a ~200-node rail-only graph: joining the bus graph in pushes the total node count into the thousands.
-- **`src/routing/routePlanner.ts`** — the reroute engine itself: resolves origin/destination (a station name/code, or a bare `"lat,lon"` for a genuinely door-to-door query), computes both the *usual* shortest path and the *live* one (with disrupted-line edges removed per the current `TrainServiceAlerts`), and derives `disruptionReason`, `deltaMinutes`, `avoidedSegments` (for map rendering), a `confidenceRangeMinutes` band instead of one falsely-precise number, and accessibility/weather advisories.
-- **`src/routing/timeOfDay.ts`** — classifies a departure time (Singapore local time, explicit `Asia/Singapore` conversion so this is correct regardless of the server's own timezone) into am-peak/pm-peak/night/off-peak, and applies planning-grade multipliers and boarding-wait constants for that period, plus first/last-service cutoffs so a query outside operating hours degrades gracefully instead of silently pretending the network is 24-hour.
-- **`src/services/*`** — one file per LTA dataset (train alerts, crowding, bus arrivals, lift outages, road works) plus `weatherService.ts` (data.gov.sg's public 2-hour forecast, used only to flag a walking leg as rain-affected) and `notificationService.ts` (a 60-second poller that diffs successive disruption/lift-outage snapshots and POSTs to any subscribed webhook the moment something newly becomes affected — the server-to-server building block a real mobile push (FCM/APNs) would sit behind).
-- **`src/repositories/*`** — saved routes (file-backed under `data/`, survives a restart), crowdsourced crowding reports and webhook subscriptions (in-memory, deliberately — see §5), each behind a small interface so any of them can be swapped for a real database without touching the route/service layer.
-- **`public/`** — a Leaflet-based console using a Protomaps vector basemap (a pre-built tileset derived from OpenStreetMap, fetched over HTTP range requests rather than raster tiles from `tile.openstreetmap.org`, avoiding the public-tile-server load policy PS2 calls out) with `© OpenStreetMap contributors` attribution alongside Protomaps' own. It renders the live route against the usual one (dashed, muted) with avoided segments highlighted in red, plots stations/buses/crowding as coloured markers, and lets a user click the map to set an arbitrary door-to-door origin/destination.
+- **`src/lta/client.ts` — LTA Data Layer.** Provides a single wrapper for
+  all LTA DataMall requests, including authentication, caching, and error
+  handling. Each dataset uses a cache duration based on its refresh
+  frequency, such as 15s for bus arrivals and ~30min for crowd density.
+- **`src/routing/graph.ts` — Rail Network.** Contains Singapore's heavy-rail
+  network with station-to-station running times based on LTA's published
+  line diagrams. This provides the base rail network used for route
+  calculation.
+- **`src/routing/busGraph.ts` — Bus Network.** Builds a live bus-stop graph
+  from LTA's `BusStops` and `BusRoutes` data and connects nearby bus stops
+  to the rail network. The graph is cached for 6 hours to avoid repeatedly
+  rebuilding the network.
+- **`src/routing/dijkstra.ts` — Route Calculation.** Uses binary-heap
+  Dijkstra to find routes across the combined bus and rail network. The
+  algorithm accounts for boarding waits when changing or starting a
+  bus/train service.
+- **`src/routing/routePlanner.ts` — Rerouting Engine.** Calculates both the
+  commuter's usual route and the current route with disrupted segments
+  removed. It then returns the alternative route, disruption reason,
+  estimated time difference, avoided segments, and relevant accessibility
+  or weather advisories.
+- **`src/routing/timeOfDay.ts` — Time Estimation.** Classifies journeys into
+  peak, off-peak, and night periods using Singapore local time. It applies
+  different planning-grade travel and boarding-time estimates while
+  respecting first/last-service cutoffs.
+- **`src/services/*` — Live Data Services.** Handles individual LTA
+  datasets including disruptions, crowding, bus arrivals, lift outages, and
+  road works, alongside weather and notification services. The
+  notification service checks for newly affected routes and sends updates
+  to subscribed webhooks.
+- **`src/repositories/*` — Data Storage.** Stores saved routes,
+  crowdsourced crowding reports, and notification subscriptions behind
+  simple repository interfaces. Saved routes persist between restarts,
+  while crowd reports and subscriptions are currently stored in memory.
+- **`public/` — Frontend Console.** Provides the interactive map-based
+  interface using Leaflet and a Protomaps/OpenStreetMap-based map. It
+  displays routes, avoided segments, stations, buses, and crowding, while
+  allowing users to select their own origin and destination.
 
-## 4. Assumptions
+LTA data is fetched through a shared client with endpoint-specific caching.
+The routing engine combines the Singapore rail network with a live bus-stop
+graph and uses Dijkstra's algorithm to calculate routes. When a disruption
+is detected, the system compares the usual route with a live route and
+returns an alternative together with the disruption reason and estimated
+time difference.
 
-- **Bus travel time is a planning-grade estimate (20 km/h average, from each route's cumulative `Distance` field), not measured**, since DataMall does not publish inter-stop bus timetables. Rail per-hop minutes come from LTA's official line diagrams (see §3) and are real published figures, not estimated.
-- **Boarding-wait and peak/off-peak speed multipliers are planning-grade constants** (e.g. MRT ~1.5 min average wait at peak, ~3 min off-peak, ~6 min late night; bus ~5/7/12 min respectively), reasoned from commonly-cited headway ranges rather than measured against live headway data, because LTA does not publish per-service headways as machine-readable data. `confidenceRangeMinutes` exists specifically because of this: it is `totalMinutes` plus roughly 15% (minimum 1 minute), floor/ceil-bounded around the same rounded estimate, so the UI shows a band rather than a false-precision single number.
-- **Rail/bus operating hours are network-wide constants** (~5:30am–midnight for rail, extended to ~1am the night before a weekend; ~5:30am–12:30am for regular buses), not per-line/per-service facts, since that data isn't published as a queryable feed either. NightRider overnight bus routes are out of scope for the same reason.
-- **A missing or invalid LTA account key degrades gracefully rather than failing everything.** Reroute assumes "no known disruptions" if the alerts call fails for that reason (a real LTA outage still surfaces as a 502); weather and lift-outage enrichment are treated as optional, so their failure just omits that one piece of advice.
-- **LTA endpoint paths and response shapes were confirmed against the live API** using the account key configured for this project (2026-09-17): `v3/BusArrival`, `v2/FacilitiesMaintenance` (which is genuinely "lifts currently faulty", not a maintenance calendar, despite the name), `RoadWorks`, `BusStops`, and `BusRoutes` all match what the code assumes. If an older account key predates LTA's mid-2025 migration off `BusArrivalv2`, `BUS_ARRIVAL_LEGACY` in `src/lta/endpoints.ts` is the fallback path.
+## Features
 
-## 5. Known limitations
+**Input options**
+- Able to input current location and destination, and time of departure
+- Able to specify preferred bus/train service
+- Able to interact with the map directly to specify destination
+- Save routes
 
-- **There is no public LTA DataMall endpoint for real-time MRT/LRT arrival ETAs.** LTA's Bus Arrival API gives genuine per-vehicle ETAs; the rail equivalent doesn't exist — only service status (`TrainServiceAlerts`) and platform crowd density are published for rail. Any "next train" figure a UI built on this backend shows for a rail leg is therefore a schedule/frequency estimate, not a live countdown, and should say so rather than imply otherwise.
-- **OSM is used for map rendering and attributed correctly, but not yet for pedestrian routing detail.** PS2 highlights OSM's footway/crossing/stairs/lift/covered-walkway data as the reason it's the required geospatial base; this backend's walking legs are straight-line (haversine) estimates at a fixed walking pace, not routed over OSM's actual pedestrian network or LTA's `CoveredLinkWay`/`Footpath`/`TrainStationExit` layers. This is the most honest gap to flag against the brief's GIS requirement — the map is OSM-based, the walking-leg *routing* is not.
-- **The `public/` console is a debugging/demo tool, not the persona-tailored mobile product the rubric scores Ease of Use against.** It is usable on a phone (it has a mobile breakpoint and the map fills the viewport), and every mandatory capability is reachable from it, but it is one generic screen with tabs for every endpoint rather than Rachel's specific one-line "take the 190, +11 min" moment, or Mdm Lim's large-text, plan-ahead flow. A judge should expect an engineering console, not a finished commuter app.
-- **Saved routes are file-backed** (`data/saved-routes.json`); **crowd reports and webhook subscriptions are in-memory** and do not survive a restart. This is deliberate for the latter two (a crowd report already expires after 15 minutes; a subscription only matters while its owner is actively listening) but means neither scales past a single process.
-- **No account system.** Saved routes are scoped by a client-generated `X-Device-Id` (a UUID persisted in `localStorage`), validated as a UUID so a short guessable value can't be used to read another device's routes — but this is an identifier, not authentication; anyone who obtains a specific UUID can access that device's saved routes.
-- **No AI/LLM layer**, by choice: turning free-text service notices into structured advice, or predicting disruption duration, would be a thin wrapper without real usage data to ground it. The reroute engine's disruption detection is entirely structured-feed-driven (`TrainServiceAlerts.AffectedSegments`), not text-parsed.
-- **No historical passenger-volume baseline** (`PV/*`) for "is this crowd unusual for a Tuesday" reasoning — LTA publishes this as monthly CSV/zip downloads, not a queryable API, which is a data-engineering task on its own.
-- **Arjun's comfort/shelter-weighted persona scoring is not built.** Only `standard` and `accessible` personas exist; a genuine "optimise for comfort over speed" mode would need the persona-weighted scoring layer described as future work below.
+**Transit route options**
+- Multimodal routing that combines multiple forms of transit
+- Real-time data integration that shows a live estimate of travel time
+- Service alerts that warn users of route disruptions
 
-## 6. What's next
+**Live updates**
+- Refresh on train alerts and crowding in specific areas
+- Reroutes based on user request or route disruption
+
+## Assumptions
+
+- **Bus travel time** is estimated using an average 20 km/h, derived from
+  each route's cumulative distance, because LTA does not provide inter-stop
+  bus timetables.
+- **Boarding waits** are planning-grade constants based on commonly cited
+  headway ranges.
+- **Rail travel time** is based on LTA's published station-running-time
+  diagrams.
+- **Walking time** is currently estimated using straight-line distance and
+  a fixed walking pace rather than the actual pedestrian network.
+- **Confidence range** is shown instead of presenting estimated journey
+  times as falsely precise.
+
+## Limitations
+
+- LTA does not provide a real-time MRT/LRT arrival ETA feed, so rail arrival
+  figures are estimates rather than live countdowns.
+- Walking routes currently use straight-line distance rather than OSM
+  pedestrian paths.
+- Saved routes are file-backed, while crowd reports and subscriptions are
+  currently in-memory.
+- There is no account/authentication system yet.
+- Persona-weighted comfort vs. travel speed vs. shelter scoring is not yet
+  implemented.
+- The `public/` console is a functional debugging/demo interface covering
+  every mandatory capability, not yet the persona-styled, one-thumb mobile
+  product the brief describes for Rachel and Mdm Lim individually.
+
+## What's next
 
 In priority order, given the gaps above:
 
-1. **Pedestrian routing** — route walking legs over OSM's actual pedestrian layer (`Footpath`, `CoveredLinkWay`, `TrainStationExit`) instead of the current haversine straight-line estimate. This is the concrete gap against PS2's GIS requirement (§5) and the one to close first.
-2. **Comfort scoring** — a persona-weighted term that trades a few minutes of travel time for fewer transfers/less crowding, for a persona like Arjun who explicitly prefers predictability over pure speed. Not built today: only `standard` and `accessible` exist, and neither re-ranks by comfort.
-3. **Shelter routing** — a separate weighted term that prefers routes with more covered walking distance (via OSM's `CoveredLinkWay`) when it's raining, upgrading the current all-or-nothing `weatherAdvisory` (which only *warns* about an exposed walking leg) into something that can actually route around the rain.
-4. **Database storage** — replace the file-backed saved-routes store and in-memory crowd-report/webhook-subscription repositories with a real database, so state survives beyond a single process and can scale past one instance.
-5. **Mobile interface** — a genuine mobile-first, persona-styled screen per use case (Rachel's one-line "take the 190, +11 min" moment; Mdm Lim's large-text, plan-ahead flow), built against the endpoints this backend already exposes, replacing the generic engineering console in `public/`.
-6. **Push notifications** — replace the webhook subscription mechanism (§3, §5) with real mobile push (FCM/APNs) once there's a mobile client with device tokens to deliver to. The webhook poller already does the hard part (diffing disruption snapshots and firing only on a genuine state change); push would sit behind the same trigger, not require re-architecting it.
+1. Route walking legs over OSM's actual pedestrian layer (`Footpath`,
+   `CoveredLinkWay`, `TrainStationExit`) instead of haversine, since that's
+   the concrete GIS-requirement gap.
+2. A persona-weighted scoring layer (speed vs. comfort vs. shelter) rather
+   than only a binary standard/accessible split.
+3. A real database behind saved routes/subscriptions once this needs to run
+   as more than one process.

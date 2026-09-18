@@ -30,6 +30,20 @@ export function createApp() {
         useDefaults: true,
         directives: {
           "connect-src": ["'self'", "https://build.protomaps.com"],
+          // app.js falls back to OpenStreetMap's raster tiles (loaded as
+          // plain <img> tiles by Leaflet) when the Protomaps vector basemap
+          // can't be reached, so img-src needs that host too - otherwise the
+          // CSP silently blocks the fallback tiles and the map is just blank.
+          "img-src": ["'self'", "data:", "https://*.tile.openstreetmap.org"],
+          // Helmet's defaults include upgrade-insecure-requests, which tells
+          // the browser to silently rewrite every subresource request (CSS,
+          // JS, tile fetches) to https:// - harmless on localhost (treated
+          // as a secure origin already) but fatal when this plain-http dev
+          // server is reached over LAN by IP (e.g. from a phone): the
+          // upgraded https:// requests have nothing listening and fail,
+          // leaving an unstyled page with no map. This server has no TLS
+          // listener, so that upgrade is never appropriate here.
+          "upgrade-insecure-requests": null,
         },
       },
     })

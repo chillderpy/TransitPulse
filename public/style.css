@@ -109,6 +109,40 @@ html, body {
 .swatch-usual { background: var(--muted); opacity: 0.7; }
 .swatch-avoided { background: var(--danger); }
 
+/* ---- route picker: choosing between several ranked route options ---- */
+.route-picker {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin-bottom: 12px;
+  padding-bottom: 2px;
+}
+.route-option-btn {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 12px;
+  min-height: 0;
+  flex-shrink: 0;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+.route-option-btn:hover { opacity: 1; }
+.route-option-btn.active {
+  border-color: var(--accent);
+  background: rgba(79, 140, 255, 0.14);
+  opacity: 1;
+}
+.route-option-rank { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.route-option-btn.active .route-option-rank { color: var(--accent); }
+.route-option-time { font-size: 15px; font-weight: 600; }
+.route-option-meta { font-size: 11px; color: var(--muted); }
+
 .leaflet-popup-content-wrapper, .leaflet-popup-tip {
   background: var(--panel);
   color: var(--text);
@@ -311,6 +345,41 @@ button:hover { opacity: 0.9; }
 
 .result .error { color: var(--danger); }
 .result .note { color: var(--muted); font-size: 12px; margin-top: 6px; }
+
+/* Used outside .result too (e.g. the manual save-route form's inline error). */
+.error { color: var(--danger); font-size: 12px; }
+.error:empty { display: none; }
+
+/* A deliberately calmer look than .error - this is "can't reach live data
+   right now", not "something broke". */
+.offline-message {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  border: 1px dashed var(--border);
+}
+
+/* Fixed banner for the online/offline signal in callApi() - sits above the
+   map and respects the notch/status-bar safe area like the bottom sheet
+   respects the home-indicator area. */
+.connectivity-banner {
+  position: fixed;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2000;
+  max-width: calc(100vw - 32px);
+  background: var(--danger);
+  color: #fff;
+  font-size: 13px;
+  text-align: center;
+  padding: 8px 14px;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+.connectivity-banner.hidden { display: none; }
 
 .steps { list-style: none; padding: 0; margin: 0; }
 .steps li {
