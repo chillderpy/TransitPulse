@@ -1,0 +1,33 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - -t
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/transitpulse/api:${SHORT_SHA}'
+      - .
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - push
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/transitpulse/api:${SHORT_SHA}'
+
+  - name: 'gcr.io/google-cloud-sdk/slim'
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - transitpulse
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/transitpulse/api:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --set-secrets=LTA_ACCOUNT_KEY=lta-account-key:latest
+      - --set-env-vars=CORS_ORIGIN=${_CORS_ORIGIN},ENABLE_MOCK_DISRUPTIONS=false
+
+substitutions:
+  _REGION: asia-southeast1
+  # Override at build time: --substitutions=_CORS_ORIGIN=https://your-frontend.example.com
+  _CORS_ORIGIN: '*'
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/transitpulse/api:${SHORT_SHA}'
