@@ -18,13 +18,17 @@ const map = L.map("map", { zoomControl: false }).setView([1.3521, 103.8198], 12)
 L.control.zoom({ position: "topright" }).addTo(map);
 
 // Vector basemap via protomaps-leaflet, reading a Protomaps daily basemap
-// build directly over HTTP range requests (no tile server needed - and no
-// dependency on the OpenStreetMap raster tile hosts, which some networks
-// block). Protomaps only retains each dated build for about a week, so a
-// hardcoded filename goes stale on its own - instead we probe today's build
-// and walk backwards until one resolves, and fall back to an OSM-derived
-// raster basemap entirely if no recent build is reachable (e.g. offline
-// during dev, or every build in range has aged out).
+// build over HTTP range requests proxied through our own backend
+// (/api/basemap - see src/routes/basemap.ts). build.protomaps.com never
+// sends CORS headers, so a direct browser fetch is blocked everywhere
+// regardless of network; going through our own origin avoids that and
+// avoids leaning on the OpenStreetMap raster tile hosts, which some
+// networks/browsers block outright. Protomaps only retains each dated build
+// for about a week, so a hardcoded filename goes stale on its own - instead
+// we probe today's build and walk backwards until one resolves, and fall
+// back to an OSM-derived raster basemap entirely if no recent build is
+// reachable (e.g. our backend is offline, or every build in range has aged
+// out).
 const PMTILES_ATTRIBUTION =
   '&copy; <a href="https://protomaps.com">Protomaps</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 const RASTER_FALLBACK_ATTRIBUTION =
@@ -34,7 +38,7 @@ function pmtilesUrlForDate(date) {
   const y = date.getUTCFullYear();
   const m = String(date.getUTCMonth() + 1).padStart(2, "0");
   const d = String(date.getUTCDate()).padStart(2, "0");
-  return `https://build.protomaps.com/${y}${m}${d}.pmtiles`;
+  return `${API}/api/basemap/${y}${m}${d}.pmtiles`;
 }
 
 async function pmtilesUrlExists(url) {
