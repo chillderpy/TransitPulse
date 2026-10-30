@@ -1,15 +1,5 @@
 const API = ""; // same origin - this page is served by the backend itself
 
-// Render's free tier can take 30-60s to cold-boot the backend after it's
-// spun down from idling - long enough that a short abort would misreport a
-// perfectly healthy (just slow) server as "no connection". HARD_TIMEOUT_MS
-// (used by callApi, defined below) is set past that worst case for
-// genuinely hung requests; WAKING_HINT_MS is how long a call is allowed to
-// run before the connectivity banner switches to a reassuring "waking up"
-// message instead of just going quiet. Declared here at the top of the
-// script, not next to callApi further down, because loadStations() runs at
-// top level before that point in the file and would otherwise hit these
-// consts' temporal dead zone.
 const HARD_TIMEOUT_MS = 55000;
 const WAKING_HINT_MS = 4000;
 
@@ -59,14 +49,7 @@ async function findRecentPmtilesUrl(maxDaysBack = 14) {
     date.setUTCDate(date.getUTCDate() - i);
     return pmtilesUrlForDate(date);
   });
-  // Probed in parallel rather than one-at-a-time-await: a systemic failure
-  // (e.g. Protomaps' CDN serving every dated build with a stale cached
-  // Access-Control-Allow-Origin header pinned to some other origin) used to
-  // mean waiting out up to maxDaysBack sequential failed fetches before
-  // falling back to raster tiles - the map looked broken/disconnected for
-  // several extra seconds for no benefit, since a same-cause failure on one
-  // date doesn't make an older date any more likely to work. Firing them
-  // together costs one round trip instead of maxDaysBack.
+  // Probed in parallel rather than one-at-a-time-await
   const exists = await Promise.all(candidates.map(pmtilesUrlExists));
   const firstOkIndex = exists.findIndex(Boolean);
   return firstOkIndex === -1 ? null : candidates[firstOkIndex];
@@ -80,14 +63,7 @@ async function findRecentPmtilesUrl(maxDaysBack = 14) {
       .addTo(map);
     return;
   }
-  // No dated build in the last two weeks resolved - fall back to
-  // OpenStreetMap's own raster tiles rather than showing a blank map.
-  // (CARTO's free basemaps, used here previously, now require signup and
-  // watermark unauthenticated tiles with "API KEY REQUIRED" - see
-  // https://carto.com/basemaps/apikey - so they're no longer a usable
-  // fallback.) This is a last-resort path only (Protomaps is the normal
-  // basemap), so the occasional extra load on OSM's tile servers is
-  // acceptable despite PS2's general preference for avoiding them.
+
   console.warn(
     "No recent Protomaps build reachable; falling back to OpenStreetMap's raster tiles."
   );
@@ -234,8 +210,7 @@ function getDeviceId() {
   let id = localStorage.getItem("transitpulse-device-id");
   // A device that generated its id before this fix (or whose randomUUID()
   // was unavailable in an insecure context) may have a non-UUID value
-  // already cached - the backend rejects that on every request, so replace
-  // it rather than trusting anything already stored.
+  // already cached
   if (!id || !UUID_RE.test(id)) {
     id = generateUuidV4();
     localStorage.setItem("transitpulse-device-id", id);
@@ -247,11 +222,7 @@ function getDeviceId() {
 // A fixed pill above the map, shown on the `offline` window event, on a
 // fetch that couldn't reach the server at all (callApi below), or if the
 // page loads already offline - and hidden again on `online` or the next
-// successful callApi() call. Also doubles as a "waking up" notice (see
-// WAKING_HINT_MS below) for Render's free tier, which spins the backend
-// down after ~15min idle - the first request after that can take 30-60s to
-// cold-boot, and without this a slow-but-fine server looked identical to a
-// genuinely dead one.
+// successful callApi() call.
 const connectivityBanner = document.getElementById("connectivity-banner");
 let isOffline = false;
 let wakingCalls = 0; // count, not bool - concurrent callApi() calls at page load can overlap
@@ -283,8 +254,7 @@ window.addEventListener("offline", () => setOffline(true));
 if (!navigator.onLine) setOffline(true);
 
 // Thrown by callApi() when the request itself couldn't complete (no
-// connection, DNS/timeout failure) - distinct from an Error thrown for an
-// HTTP error response, which did reach the server and has a real message.
+// connection, DNS/timeout failure) 
 // Callers use this to decide between an "offline" message and a normal one.
 class NetworkError extends Error {}
 
@@ -323,7 +293,7 @@ function showOfflineMessage(el, message) {
 // ---- helpers ----
 async function callApi(path, options = {}) {
   // A hung request on a flaky tunnel connection would otherwise leave
-  // "Loading…" on screen forever - abort and treat it the same as offline.
+  // "Loading…" on screen forever
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), HARD_TIMEOUT_MS);
   let wokeWakingBanner = false;
@@ -358,7 +328,7 @@ async function callApi(path, options = {}) {
 
 // Some backend errors surface server-config details (e.g. a missing LTA
 // API key) that are meaningful to whoever runs this server, not to
-// someone using it - swap those for a plain "try again later" message.
+// someone using it 
 function userFacingMessage(message) {
   if (/LTA_ACCOUNT_KEY|LTA DataMall/i.test(message || "")) {
     return "This live data isn't available right now. Please try again later.";
@@ -404,6 +374,13 @@ async function refreshHealth() {
 refreshHealth();
 
 // ==================== reroute ====================
+const cssColor = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+const DATA_STATUS_NOTES = {
+  stale: "Live disruption data is temporarily unavailable - using the last reading we have.",
+  unavailable: "Live disruption data is unavailable - this route may not reflect current incidents.",
+};
+
 function drawRoute(data) {
   routeLayer.clearLayers();
   pickLayer.clearLayers(); // the route's own origin/destination markers replace any picked pins
@@ -411,21 +388,20 @@ function drawRoute(data) {
   pickMarkers.destination = null;
 
   // Usual (undisrupted) path drawn first, dashed and muted, so the live
-  // path can be compared against it - "here's what you'd normally take"
-  // vs "here's what you're taking now", per PS2's before/after ask.
+  // path can be compared against it
   const usualDiffersFromLive = JSON.stringify(data.usualPath) !== JSON.stringify(data.livePath);
   if (usualDiffersFromLive && data.usualPath.length >= 2) {
-    L.polyline(data.usualPath, { color: "#8b90a0", weight: 4, opacity: 0.6, dashArray: "6 8" }).addTo(routeLayer);
+    L.polyline(data.usualPath, { color: cssColor("--muted"), weight: 4, opacity: 0.6, dashArray: "6 8" }).addTo(routeLayer);
   }
 
   // Segments of the usual route being avoided due to disruption, highlighted red.
   (data.avoidedSegments || []).forEach(([from, to]) => {
-    L.polyline([from, to], { color: "#ff5c5c", weight: 5, opacity: 0.9, dashArray: "2 6" }).addTo(routeLayer);
+    L.polyline([from, to], { color: cssColor("--danger"), weight: 5, opacity: 0.9, dashArray: "2 6" }).addTo(routeLayer);
   });
 
   if (data.livePath.length >= 2) {
     const line = L.polyline(data.livePath, {
-      color: usualDiffersFromLive ? "#e6a53c" : "#4f8cff",
+      color: cssColor(usualDiffersFromLive ? "--warning" : "--accent"),
       weight: 5,
       opacity: 0.9,
     }).addTo(routeLayer);
@@ -459,10 +435,7 @@ function drawRoute(data) {
   });
 }
 
-// Keeps fitted content clear of the floating control panel - on a wide
-// viewport that's a ~400px side panel on the left, but on a phone
-// (<=640px, see style.css's mobile breakpoint) the panel is a bottom sheet
-// instead, so the occluded edge is the bottom, not the left.
+// Keeps fitted content clear of the floating control panel
 function isMobileLayout() {
   return window.matchMedia("(max-width: 640px)").matches;
 }
@@ -497,8 +470,7 @@ function setViewAvoidingPanel(latlng, zoom) {
 // Demo presets for the "Depart" picker: rather than a full datetime input,
 // each option jumps to a wall-clock time in Singapore that lands in the
 // matching bucket the backend's timeOfDay classifier uses (see
-// src/routing/timeOfDay.ts) - peak presets are pinned to the next weekday
-// so picking "Morning peak" always lands there even on a weekend.
+// src/routing/timeOfDay.ts)
 const DEPART_PRESETS = {
   amPeak: { hour: 8, minute: 0, weekdayOnly: true },
   pmPeak: { hour: 18, minute: 30, weekdayOnly: true },
@@ -538,48 +510,79 @@ let lastRerouteResult = null;
 
 // The API labels a picked-on-map point as "Your location" rather than
 // returning its coordinates, since that's meant as a display label, not
-// an identifier - fine for showing the route just planned, but useless
-// for saving (every pin would collapse to the same name and "Show" would
-// have nothing to route back to). Fall back to the raw "lat,lon" string
-// that was actually submitted so the saved route still points somewhere.
+// an identifier
 function saveableEndpoint(resolvedLabel, rawInput) {
   return resolvedLabel === "Your location" ? rawInput : resolvedLabel;
 }
 
-async function saveCurrentRoute() {
+function saveableEndpoints(result) {
+  return {
+    originStation: saveableEndpoint(result.originStation, result.requestOrigin),
+    destinationStation: saveableEndpoint(result.destinationStation, result.requestDestination),
+  };
+}
+
+const saveDialog = document.getElementById("save-dialog");
+const saveForm = document.getElementById("form-save");
+const saveDialogError = document.getElementById("save-dialog-error");
+
+// "Save route" asks for a name first; the endpoints are prefilled as a suggestion
+function openSaveDialog() {
   if (!lastRerouteResult) return;
-  const btn = document.getElementById("save-route-btn");
-  const originStation = saveableEndpoint(lastRerouteResult.originStation, lastRerouteResult.requestOrigin);
-  const destinationStation = saveableEndpoint(lastRerouteResult.destinationStation, lastRerouteResult.requestDestination);
-  btn.disabled = true;
-  btn.textContent = "Saving…";
+  const { originStation, destinationStation } = saveableEndpoints(lastRerouteResult);
+  saveForm.elements.name.value = `${originStation} → ${destinationStation}`;
+  saveDialogError.textContent = "";
+  saveDialog.showModal();
+  saveForm.elements.name.select();
+}
+
+document.getElementById("save-cancel").addEventListener("click", () => saveDialog.close());
+
+saveForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const route = lastRerouteResult;
+  if (!route) return;
+  const name = saveForm.elements.name.value.trim();
+  const submitBtn = saveForm.querySelector("button[type=submit]");
+  submitBtn.disabled = true;
+  saveDialogError.textContent = "";
   try {
     await callApi("/api/saved-routes", {
       method: "POST",
       headers: { "x-device-id": getDeviceId() },
       body: JSON.stringify({
-        name: `${originStation} → ${destinationStation}`,
-        originStation,
-        destinationStation,
-        persona: lastRerouteResult.requestPersona,
-        ...(lastRerouteResult.requestDepartPreset ? { departPreset: lastRerouteResult.requestDepartPreset } : {}),
+        name,
+        ...saveableEndpoints(route),
+        persona: route.requestPersona,
+        ...(route.requestDepartPreset ? { departPreset: route.requestDepartPreset } : {}),
       }),
     });
-    btn.textContent = "Saved ✓";
+    route.savedName = name;
+    saveDialog.close();
+    showRouteSaved();
     loadSavedRoutes();
   } catch (err) {
-    btn.disabled = false;
-    btn.textContent = "Save this route";
-    document.getElementById("save-route-error").textContent = userFacingMessage(err.message);
+    saveDialogError.textContent = isNetworkError(err)
+      ? "You're offline - can't save this route right now."
+      : userFacingMessage(err.message);
+  } finally {
+    submitBtn.disabled = false;
   }
+});
+
+function showRouteSaved() {
+  const btn = document.getElementById("save-route-btn");
+  btn.textContent = "Saved ✓";
+  btn.disabled = true;
+}
+
+function disruptionPillHtml(data, option) {
+  if (option.disruptionReason) return `<div class="pill pill-disrupted">🚧 ${escapeHtml(option.disruptionReason)}</div>`;
+  return data.disruptionDataStatus === "live" ? `<div class="pill pill-normal">No known disruption on this route</div>` : "";
 }
 
 // A disrupted commuter is choosing between several new optimal routes, not
-// between the old route and one new one (see RerouteSuggestionDto.routes) -
-// this renders that choice as a row of tappable option cards above the
-// summary, one per ranked route, so a route with more than one viable
-// option is actually explorable in the demo rather than only ever showing
-// the fastest.
+// between the old route and one new one (see RerouteSuggestionDto.routes)
 function buildRoutePickerHtml(routes, selectedId) {
   if (!routes || routes.length <= 1) return "";
   const cards = routes
@@ -596,50 +599,46 @@ function buildRoutePickerHtml(routes, selectedId) {
   return `<div class="route-picker" role="tablist" aria-label="Route options">${cards}</div>`;
 }
 
-// Renders one selected route option (steps, summary, map) - `data` carries
-// the fields shared across every option (usualPath/usualMinutes/
-// timeContext/serviceHoursNote/the full routes list), `option` carries the
-// fields specific to the one currently picked (steps/livePath/
-// avoidedSegments/totalMinutes/etc, see RouteOptionDto).
+// Renders one selected route option (steps, summary, map)
 function renderRouteOption(data, option) {
   const el = document.getElementById("result-reroute");
   const stepsHtml = option.steps
     .map((s) => `<li><span>${s.order}. ${escapeHtml(s.station)}</span><span class="hint">${escapeHtml(s.note)}</span></li>`)
     .join("");
   const warningsHtml = (option.accessibilityWarnings || [])
-    .map((w) => `<div class="pill pill-disrupted" style="display:block;margin-top:6px">${escapeHtml(w)}</div>`)
+    .map((w) => `<div class="pill pill-disrupted pill-block">${escapeHtml(w)}</div>`)
     .join("");
   const timeIcon = TIME_CONTEXT_ICONS[data.timeContext?.period] || "🕐";
   el.innerHTML = `
     ${buildRoutePickerHtml(data.routes, option.id)}
     <div class="summary-row">
-      <div><b>${option.confidenceRangeMinutes.min}–${option.confidenceRangeMinutes.max} min</b>estimated</div>
-      <div><b>${data.usualMinutes} min</b>usual</div>
-      <div><b>${option.deltaMinutes >= 0 ? "+" : ""}${option.deltaMinutes} min</b>vs usual</div>
+      <div><b>${option.confidenceRangeMinutes.min}–${option.confidenceRangeMinutes.max}</b>min estimated</div>
+      <div><b>${data.usualMinutes}</b>min usual</div>
+      <div><b>${option.deltaMinutes >= 0 ? "+" : ""}${option.deltaMinutes}</b>min vs usual</div>
       <div><b>${option.transfers}</b>transfers</div>
     </div>
     ${data.timeContext ? `<div class="pill pill-normal">${timeIcon} ${escapeHtml(data.timeContext.label)} timing</div>` : ""}
-    ${data.serviceHoursNote ? `<div class="pill pill-medium" style="display:block;margin-top:6px">🕒 ${escapeHtml(data.serviceHoursNote)}</div>` : ""}
-    ${option.disruptionReason ? `<div class="pill pill-disrupted">🚧 ${escapeHtml(option.disruptionReason)}</div>` : `<div class="pill pill-normal">No known disruption on this route</div>`}
-    ${option.crowdingReason ? `<div class="pill pill-medium" style="display:block;margin-top:6px">👥 ${escapeHtml(option.crowdingReason)}</div>` : ""}
-    ${option.weatherAdvisory ? `<div class="pill pill-medium" style="display:block;margin-top:6px">☔ ${escapeHtml(option.weatherAdvisory.message)}</div>` : ""}
+    ${data.serviceHoursNote ? `<div class="pill pill-medium pill-block">🕒 ${escapeHtml(data.serviceHoursNote)}</div>` : ""}
+    ${disruptionPillHtml(data, option)}
+    ${DATA_STATUS_NOTES[data.disruptionDataStatus] ? `<div class="pill pill-medium pill-block">⚠️ ${DATA_STATUS_NOTES[data.disruptionDataStatus]}</div>` : ""}
+    ${option.crowdingReason ? `<div class="pill pill-medium pill-block">👥 ${escapeHtml(option.crowdingReason)}</div>` : ""}
+    ${option.weatherAdvisory ? `<div class="pill pill-medium pill-block">☔ ${escapeHtml(option.weatherAdvisory.message)}</div>` : ""}
     ${warningsHtml}
     ${
       JSON.stringify(data.usualPath) !== JSON.stringify(option.livePath) && data.usualPath.length >= 2
         ? `<div class="route-legend"><span><i class="swatch swatch-live"></i>Route you're taking (${option.totalMinutes} min)</span><span><i class="swatch swatch-usual"></i>Usual route (${data.usualMinutes} min)</span><span><i class="swatch swatch-avoided"></i>Segment avoided</span></div>`
         : ""
     }
-    <ul class="steps" style="margin-top:12px">${stepsHtml}</ul>
-    <button type="button" id="save-route-btn" style="margin-top:12px">Save this route</button>
-    <div id="save-route-error" class="error" style="display:inline-block;margin-left:8px"></div>
+    <ul class="steps">${stepsHtml}</ul>
+    <button type="button" id="save-route-btn" class="btn-secondary">Save route</button>
   `;
-  document.getElementById("save-route-btn").addEventListener("click", saveCurrentRoute);
+  document.getElementById("save-route-btn").addEventListener("click", openSaveDialog);
+  if (data.savedName) showRouteSaved();
   drawRoute({ ...data, ...option });
 }
 
 // Event delegation on the (stable) result container, rather than binding a
-// listener per option button - the container's innerHTML is replaced on
-// every render, which would otherwise leak listeners or silently drop them.
+// listener per option button
 document.getElementById("result-reroute").addEventListener("click", (e) => {
   const btn = e.target.closest(".route-option-btn");
   if (!btn || !lastRerouteResult) return;
@@ -674,8 +673,7 @@ async function submitReroute(origin, destination, persona, departPreset, mockDis
   } catch (err) {
     lastRerouteResult = null;
     // Reroute is point-in-time (based on live disruption/crowding data), so
-    // there's no sensible cached fallback - just say plainly that it needs
-    // a connection, rather than showing stale directions as if current.
+    // there's no sensible cached fallback
     if (isNetworkError(err)) {
       showOfflineMessage(el, "You're offline — can't plan a route right now.");
     } else {
@@ -743,9 +741,7 @@ document.getElementById("form-arrivals").addEventListener("submit", async (e) =>
     } else if (busPoints.length === 1) {
       // fitBounds on a single-point (zero-area) bounds computes an invalid
       // zoom with this panel's asymmetric padding and permanently corrupts
-      // the map (every future render goes to NaN) - setView sidesteps the
-      // degenerate bounds case entirely, same as drawRoute does for a
-      // single-point livePath.
+      // the map (every future render goes to NaN)
       setViewAvoidingPanel(busPoints[0], 15);
     }
   } catch (err) {
@@ -908,19 +904,19 @@ function renderSavedRoutes(list, routes, cachedTs) {
           .map(
             (r) => `
         <li>
-          <div>
-            <div><b>${escapeHtml(r.name)}</b></div>
-            <div class="hint">${escapeHtml(r.originStation)} → ${escapeHtml(r.destinationStation)}</div>
+          <div class="saved-info">
+            <div class="saved-name">${escapeHtml(r.name)}</div>
+            <div class="saved-route">${escapeHtml(r.originStation)} → ${escapeHtml(r.destinationStation)}</div>
             <div class="hint">${r.persona === "accessible" ? "Accessibility-first" : "Standard"}${r.departPreset ? ` · ${DEPART_PRESET_LABELS[r.departPreset] || r.departPreset}` : ""}</div>
           </div>
           <div class="list-actions">
-            <button type="button" data-show="${r.id}">Show</button>
+            <button type="button" class="primary" data-show="${r.id}">Check route</button>
             <button type="button" class="remove" data-id="${r.id}">Remove</button>
           </div>
         </li>`
           )
           .join("")
-      : `<li class="hint">No saved routes yet.</li>`);
+      : `<li class="empty">No saved routes yet. Get a route on the Reroute tab, then tap Save route.</li>`);
 
   list.querySelectorAll("button[data-id]").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -973,29 +969,5 @@ async function loadSavedRoutes() {
     list.innerHTML = `<li class="error">${escapeHtml(err.message)}</li>`;
   }
 }
-
-document.getElementById("form-saved").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const errorEl = document.getElementById("form-saved-error");
-  errorEl.textContent = "";
-  const form = new FormData(e.target);
-  try {
-    await callApi("/api/saved-routes", {
-      method: "POST",
-      headers: { "x-device-id": getDeviceId() },
-      body: JSON.stringify({
-        name: form.get("name") || undefined,
-        originStation: form.get("originStation"),
-        destinationStation: form.get("destinationStation"),
-      }),
-    });
-    e.target.reset();
-    e.target.originStation.value = "Jurong East";
-    e.target.destinationStation.value = "Raffles Place";
-    loadSavedRoutes();
-  } catch (err) {
-    errorEl.textContent = isNetworkError(err) ? "You're offline — can't save this route right now." : userFacingMessage(err.message);
-  }
-});
 
 loadSavedRoutes();

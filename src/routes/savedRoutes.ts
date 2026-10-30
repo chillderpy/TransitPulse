@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../middleware/errorHandler";
 import { savedRouteRepository } from "../repositories/savedRouteRepository";
+import { isCoordinateOutsideSingapore } from "../geo/endpointValidation";
 
 export const savedRoutesRouter = Router();
 
@@ -30,10 +31,19 @@ function requireOwnerId(req: import("express").Request, res: import("express").R
   return id;
 }
 
+// A saved endpoint is a station name/code or a "lat,lon" pair; the latter must
+// fall inside Singapore, same rule as POST /api/reroute.
+const endpointSchema = z
+  .string()
+  .min(1)
+  .refine((value) => !isCoordinateOutsideSingapore(value), {
+    message: "Coordinates must be within Singapore",
+  });
+
 const createSchema = z.object({
-  name: z.string().optional(),
-  originStation: z.string().min(1),
-  destinationStation: z.string().min(1),
+  name: z.string().trim().min(1).max(60).optional(),
+  originStation: endpointSchema,
+  destinationStation: endpointSchema,
   persona: z.enum(["standard", "accessible"]).optional(),
   departPreset: z.enum(["amPeak", "pmPeak", "offPeak", "night"]).optional(),
 });

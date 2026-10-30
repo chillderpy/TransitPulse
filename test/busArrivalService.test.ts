@@ -42,9 +42,7 @@ describe("getBusArrivals", () => {
 
   it("nulls out a bus's position when LTA marks it unmonitored with sentinel (0,0) coordinates", async () => {
     // Confirmed against the live API: LTA sets Monitored=0 and fills
-    // Latitude/Longitude with "0.0" for a bus with no GPS fix yet - a real
-    // coordinate (off the coast of Africa), not an absent one. Trusting it
-    // is how a bus stop's markers end up plotted outside Singapore.
+    // Latitude/Longitude with "0.0" for a bus with no GPS fix yet
     vi.mocked(fetchLta).mockResolvedValue({
       BusStopCode: "83139",
       Services: [

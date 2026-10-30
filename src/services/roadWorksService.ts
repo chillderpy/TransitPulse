@@ -2,8 +2,7 @@ import { fetchLta } from "../lta/client";
 import { LTA_ENDPOINTS } from "../lta/endpoints";
 
 // Confirmed against the live endpoint (2026-09-17): dates are "YYYY-MM-DD",
-// no time component, and this dataset covers *planned* roadworks - the
-// planned-disruption signal PS2 calls out as distinct from live incidents.
+// no time component, and this dataset covers *planned* roadworks
 interface LtaRoadWorkItem {
   EventID?: string;
   StartDate?: string;

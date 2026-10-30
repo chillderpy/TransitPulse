@@ -1,4 +1,4 @@
-import { fetchLta } from "../lta/client";
+import { fetchLta, LtaApiError } from "../lta/client";
 import { LTA_ENDPOINTS } from "../lta/endpoints";
 import { LtaTrainServiceAlertsResponse } from "../types/lta";
 import { LineDisruptionDto, TrainAlertsDto } from "../types/api";
@@ -8,7 +8,24 @@ import { LineDisruptionDto, TrainAlertsDto } from "../types/api";
 // poll without meaningfully delaying disruption detection.
 const ALERTS_CACHE_TTL_SECONDS = 60;
 
+let lastGoodAlerts: TrainAlertsDto | null = null;
+
+/**
+ * Live alerts, or the last good reading (flagged stale) if LTA errors out:
+ * a commuter is better served by slightly old disruption data than by no
+ * route at all. A missing API key is a configuration problem and still throws.
+ */
 export async function getTrainAlerts(): Promise<TrainAlertsDto> {
+  try {
+    lastGoodAlerts = await fetchAlerts();
+    return lastGoodAlerts;
+  } catch (err) {
+    if (err instanceof LtaApiError && lastGoodAlerts) return { ...lastGoodAlerts, dataStatus: "stale" };
+    throw err;
+  }
+}
+
+async function fetchAlerts(): Promise<TrainAlertsDto> {
   const data = await fetchLta<LtaTrainServiceAlertsResponse>(
     LTA_ENDPOINTS.TRAIN_SERVICE_ALERTS,
     { cacheTtlSeconds: ALERTS_CACHE_TTL_SECONDS }
@@ -18,9 +35,7 @@ export async function getTrainAlerts(): Promise<TrainAlertsDto> {
   const overallDisrupted = status.Status === 2;
 
   // Captured regardless of Status: a planned-service advisory (e.g. a
-  // scheduled LRT closure) can be present with Status still "normal", and
-  // the old code here only ever read Message inside the disrupted branch -
-  // silently dropping exactly the "planned disruption" signal callers need.
+  // scheduled LRT closure) can be present with Status still "normal"
   const generalAdvisories = (status.Message ?? []).map((m) => m.Content);
 
   const lines: LineDisruptionDto[] = overallDisrupted

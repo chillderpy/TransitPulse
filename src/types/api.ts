@@ -1,6 +1,3 @@
-// App-facing DTOs returned by our API - shaped for what the Flutter screens
-// actually need, not a raw passthrough of LTA's schema.
-
 export interface BusArrivalDto {
   busStopCode: string;
   services: Array<{
@@ -35,11 +32,16 @@ export interface TrainAlertsDto {
   overallStatus: DisruptionStatus;
   lines: LineDisruptionDto[];
   // LTA's Message field can carry planned-service advisories (e.g. a
-  // scheduled LRT closure) even while overallStatus is "normal" - these are
-  // the "planned disruption" signal, distinct from per-line live incidents.
+  // scheduled LRT closure) even while overallStatus is "normal"
   generalAdvisories: string[];
   fetchedAt: string;
+  // Provenance of the data. Omitted means live. "stale" is the last good
+  // reading served after an LTA error; "unavailable" means we have no
+  // reading at all, so "no disruptions" is an assumption, not a fact.
+  dataStatus?: DisruptionDataStatus;
 }
+
+export type DisruptionDataStatus = "live" | "stale" | "unavailable";
 
 export type CrowdLevelDto = "low" | "moderate" | "high" | "unknown";
 
@@ -99,24 +101,18 @@ export interface RouteStepDto {
 export type Persona = "standard" | "accessible";
 
 // One selectable disruption-aware route out of the ranked alternatives
-// RerouteSuggestionDto.routes offers - a commuter facing a disruption is
-// unlikely to want the pre-disruption "usual" route (it may not even be
-// possible), so the choice offered is between multiple *new* optimal
-// routes, not old-vs-new.
+// RerouteSuggestionDto.routes offers
 export interface RouteOptionDto {
   id: string; // "option-1" (fastest) .. "option-N", stable within one response
   totalMinutes: number;
-  deltaMinutes: number; // vs usualMinutes (the pre-disruption baseline), for context only
+  deltaMinutes: number; // vs usualMinutes (the pre-disruption baseline)
   // A single point estimate reads as more certain than live transit data
-  // actually is - this is totalMinutes plus a modest buffer, so the UI can
-  // show a range instead of one confident number.
+  // actually is
   confidenceRangeMinutes: { min: number; max: number };
   transfers: number;
   disruptionReason: string | null;
   // Non-null when live platform crowding (not a line disruption) changed
-  // which stations/lines this option boards at - the "crowded platform
-  // should change what the app recommends, and say why" requirement,
-  // distinct from disruptionReason above which is about outages.
+  // which stations/lines this option boards at
   crowdingReason: string | null;
   steps: RouteStepDto[];
   livePath: Array<[number, number]>;
@@ -139,6 +135,9 @@ export interface RerouteSuggestionDto {
   // departure time, so the route was planned around whichever mode(s) are
   // actually running (see src/routing/timeOfDay.ts).
   serviceHoursNote: string | null;
+  // Whether the disruption data this route was planned against was live,
+  // stale, or missing, so the client can warn instead of implying certainty.
+  disruptionDataStatus: DisruptionDataStatus;
   // Mirrors routes[0] (the fastest option) for callers that only want a
   // single suggestion; new integrations should read `routes` instead.
   totalMinutes: number;

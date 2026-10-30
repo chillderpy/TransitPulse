@@ -44,9 +44,7 @@ describe("StaticGraphRoutePlanner", () => {
 
   it("keeps the ride description on the destination step for a single-leg, no-transfer journey", async () => {
     // Jurong East -> Raffles Place is a single EWL run with zero interchanges,
-    // so the destination step is the ONLY step covering the train leg at
-    // all - a regression collapsed this down to a bare "Destination" with no
-    // indication a train was ever used.
+    // so the destination step is the ONLY step covering the train leg at all
     const result = await planner.suggest("Jurong East", "Raffles Place", noAlerts, {
       busGraph: EMPTY_BUS_GRAPH,
       departAt: OFF_PEAK_WEEKDAY,
@@ -69,9 +67,7 @@ describe("StaticGraphRoutePlanner", () => {
     expect(result.disruptionReason).toContain("EWL");
     expect(result.deltaMinutes).toBeGreaterThan(0);
     // The alert only names the Buona Vista <-> Commonwealth segment, so that's
-    // the one edge that gets cut - Commonwealth becomes unreachable without
-    // backtracking and drops out of the route, while Clementi (upstream of the
-    // cut) still lies on the detour.
+    // the one edge that gets cut 
     expect(result.steps.some((s) => s.station === "Commonwealth")).toBe(false);
   });
 
@@ -106,12 +102,10 @@ describe("StaticGraphRoutePlanner", () => {
   });
 
   it("reroutes Rachel's actual Tampines -> Raffles Place commute when the EWL is cut on her segment", async () => {
-    // Rachel (WRITEUP.md persona) rides Tampines -> Raffles Place on the EWL
+    // Rachel (persona) rides Tampines -> Raffles Place on the EWL
     // at 07:40 on a weekday. ewlBuonaVista/twoLinesEwlCcl above sit on the
     // Jurong side of the line and never touch her route (that's exactly the
-    // "why doesn't this disruption affect my commute" case) - this scenario
-    // instead cuts the EWL across the stretch she actually rides
-    // (Paya Lebar - Bugis), so it should genuinely reroute and delay her.
+    // "why doesn't this disruption affect my commute" case)
     const RACHEL_AM_PEAK = new Date("2026-09-14T07:40:00+08:00"); // Monday AM peak
     const result = await planner.suggest("Tampines", "Raffles Place", ewlDisruptedPayaLebarBugis, {
       busGraph: EMPTY_BUS_GRAPH,
@@ -130,10 +124,7 @@ describe("StaticGraphRoutePlanner", () => {
 
   it("does NOT block an edge when only one of its two endpoint stations is named as affected", async () => {
     // Same EWL "disrupted" status as ewlDisruptedAtBuonaVista, but the alert
-    // only names Buona Vista, not its neighbour Commonwealth - per the
-    // "bothNamed" rule in edgesAvoidingDisruptedLines, an edge is only cut
-    // when BOTH its endpoints are named, so this segment should stay open
-    // and the route should be unaffected.
+    // only names Buona Vista, not its neighbour Commonwealth
     const oneSidedNamedStation: TrainAlertsDto = {
       overallStatus: "disrupted",
       generalAdvisories: [],
@@ -192,7 +183,9 @@ describe("StaticGraphRoutePlanner", () => {
     expect("error" in result).toBe(false);
     if ("error" in result) return;
     expect(result.deltaMinutes).toBe(0);
-    expect(result.disruptionReason).toBeNull();
+    // Changed deliberately: still no phantom delay, but a commuter being sent down a
+    // line that LTA says is down must be warned rather than shown a silent normal route.
+    expect(result.disruptionReason).toMatch(/No alternative found/);
   });
 
   it("actually blocks disrupted lines for the network-wide outage scenario", async () => {
@@ -203,7 +196,7 @@ describe("StaticGraphRoutePlanner", () => {
     // fixture from the "falls back onto a bus route" test above: with EWL
     // (among the other five) genuinely blocked, the only rail line between
     // Tuas Link and Pasir Ris is down, so the route must go via the bus
-    // bridge - before the fix, the unblocked rail path would win instead.
+    // bridge
     const busGraph: BusGraph = {
       builtAt: Date.now(),
       stops: new Map([
@@ -229,10 +222,7 @@ describe("StaticGraphRoutePlanner", () => {
 
   it("reroutes around simultaneous disruptions on two different lines", async () => {
     // EWL cut at Buona Vista<->Commonwealth (as above) AND CCL cut at Buona
-    // Vista<->Holland Village - the second segment is exactly the detour the
-    // single-disruption test above relies on to get around the first, so
-    // this forces a real second-choice reroute rather than just falling
-    // back onto the same CCL detour.
+    // Vista<->Holland Village
     const twoLinesDisrupted = MOCK_DISRUPTION_SCENARIOS.twoLinesEwlCcl;
     const result = await planner.suggest("Jurong East", "Raffles Place", twoLinesDisrupted, {
       busGraph: EMPTY_BUS_GRAPH,
@@ -247,9 +237,7 @@ describe("StaticGraphRoutePlanner", () => {
 
   it("offers multiple ranked, distinct routes to choose between when disrupted", async () => {
     // The commuter is choosing between several new disruption-aware routes,
-    // not between the old route and one new one - so a disruption with more
-    // than one viable detour should come back with more than one option,
-    // fastest first, each taking a genuinely different path.
+    // not between the old route and one new one
     const result = await planner.suggest("Jurong East", "Raffles Place", ewlDisruptedAtBuonaVista, {
       busGraph: EMPTY_BUS_GRAPH,
       departAt: OFF_PEAK_WEEKDAY,
@@ -299,9 +287,7 @@ describe("StaticGraphRoutePlanner", () => {
 
   it("falls back to a single route option when there is no alternate path at all", async () => {
     // Same fully-disrupted CCL scenario used above, where the live graph has
-    // no path whatsoever and suggest() falls back to the "usual" route -
-    // with only one path in existence, there's nothing to offer a second
-    // option from, so routes should contain exactly that one fallback.
+    // no path whatsoever and suggest() falls back to the "usual" route
     const cclFullyDisrupted: TrainAlertsDto = {
       overallStatus: "disrupted",
       generalAdvisories: [],

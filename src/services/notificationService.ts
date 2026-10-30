@@ -1,12 +1,11 @@
 import { getTrainAlerts } from "./trainAlertsService";
 import { getLiftOutages } from "./facilitiesService";
 import { notificationSubscriptionRepository, NotificationSubscription } from "../repositories/notificationSubscriptionRepository";
+import { isPublicWebhookUrl } from "../security/webhookUrl";
 
-// PS2 frames "proactive" as the whole point - a push at 07:30 about the
-// 08:15 platform, not a screen the commuter has to remember to open. A
-// backend can't deliver an actual phone notification without a mobile push
-// provider (FCM/APNs) and device tokens, which are outside this project's
-// scope - a webhook is the equivalent server-to-server building block: the
+// A backend can't deliver an actual phone notification without a mobile push
+// provider (FCM/APNs) and device tokens
+// A webhook is the equivalent server-to-server building block: the
 // client's own backend (or a simple test receiver) registers a URL and
 // gets POSTed to the moment a *new* disruption or lift outage appears on
 // what it's watching, rather than having to poll this API itself.
@@ -22,11 +21,11 @@ interface DisruptionSnapshot {
 let previousSnapshot: DisruptionSnapshot | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 
+// Errors propagate on purpose: pollOnce() then leaves the previous snapshot
+// untouched. Treating a failed fetch as "nothing disrupted" would make the
+// next good poll re-announce every ongoing incident as new.
 async function buildSnapshot(): Promise<DisruptionSnapshot> {
-  const [alerts, liftOutages] = await Promise.all([
-    getTrainAlerts().catch(() => ({ overallStatus: "normal" as const, lines: [], generalAdvisories: [], fetchedAt: "" })),
-    getLiftOutages().catch(() => []),
-  ]);
+  const [alerts, liftOutages] = await Promise.all([getTrainAlerts(), getLiftOutages()]);
 
   const disruptedLines = new Set<string>();
   const affectedStations = new Set<string>();
@@ -48,6 +47,7 @@ function matches(subscription: NotificationSubscription, newlyBad: Set<string>):
 }
 
 async function notify(subscription: NotificationSubscription, payload: unknown): Promise<void> {
+  if (!(await isPublicWebhookUrl(subscription.webhookUrl))) return;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
   try {
@@ -56,6 +56,7 @@ async function notify(subscription: NotificationSubscription, payload: unknown):
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
       signal: controller.signal,
+      redirect: "manual",
     });
   } catch {
     // A subscriber's webhook being down shouldn't take out the poller or
@@ -101,8 +102,7 @@ export function startNotificationPoller(): void {
   timer = setInterval(() => {
     pollOnce().catch(() => {
       // A single poll failing (e.g. a transient LTA error) shouldn't stop
-      // future polls - buildSnapshot's own .catch already degrades to
-      // "nothing known", so this is a last-resort guard.
+      // future polls
     });
   }, POLL_INTERVAL_MS);
 }

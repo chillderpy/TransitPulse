@@ -1,6 +1,6 @@
 // A straight line between two points on the map cuts across blocks, rivers
 // and buildings in a way that immediately reads as "wrong" - real walking
-// and cycling legs follow footpaths and roads, not the crow flies. This
+// and cycling legs follow footpaths and roads. This
 // fetches the actual street/path-following shape for a single walk/cycle
 // hop from OSRM's public routing API, for DISPLAY only: the ride-time
 // estimate a rider sees still comes from timeOfDay.ts's flat-speed model
@@ -9,14 +9,11 @@
 // commuter actually plans against.
 //
 // router.project-osrm.org is the public OSRM demo server, rate-limited and
-// meant for light/demo use, not production traffic - fine for this
-// hackathon-scale app, but a real deployment should point PROFILE_PATH at a
-// self-hosted OSRM instance (or a paid provider) instead.
+// meant for light/demo use, not production traffic
 const OSRM_BASE = "https://router.project-osrm.org/route/v1";
 const REQUEST_TIMEOUT_MS = 4000;
 // Road geometry between two fixed points doesn't change day to day, so a
-// long-lived in-memory cache is fine - this is a display fallback, not
-// something that needs to react to live conditions.
+// long-lived in-memory cache is fine
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export type WalkCycleProfile = "foot" | "bike" | "driving";
@@ -44,7 +41,7 @@ interface OsrmRouteResponse {
  * Real path geometry for one walk/cycle hop, [lat, lon] pairs including
  * both endpoints - or null on any failure (network, timeout, no route
  * found), in which case the caller should fall back to a straight line
- * between `from` and `to`. This is enrichment, never a hard dependency.
+ * between `from` and `to`.
  */
 export async function fetchWalkCycleGeometry(
   profile: WalkCycleProfile,

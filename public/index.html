@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>TransitPulse</title>
   <link rel="manifest" href="manifest.json" />
-  <meta name="theme-color" content="#0f1115" />
+  <meta name="theme-color" content="#0b1016" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="icon" href="icons/icon-192.png" />
@@ -126,18 +126,25 @@
 
       <!-- Saved routes -->
       <section class="panel" id="panel-saved">
-        <p class="hint">Routes you save are kept on this device.</p>
-        <form id="form-saved" class="col">
-          <label>Name (optional) <input name="name" placeholder="Home to work" /></label>
-          <label>Origin <input name="originStation" value="Jurong East" required /></label>
-          <label>Destination <input name="destinationStation" value="Raffles Place" required /></label>
-          <button type="submit">Save route</button>
-        </form>
-        <div id="form-saved-error" class="error"></div>
+        <p class="hint">Routes you save are kept on this device. Save one from the Reroute tab, then tap Check route for a live reroute.</p>
         <ul id="saved-list" class="list"></ul>
       </section>
     </main>
   </div>
+
+  <dialog id="save-dialog" aria-labelledby="save-dialog-title">
+    <form id="form-save" class="col">
+      <h3 id="save-dialog-title">Name this route</h3>
+      <label>Route name
+        <input name="name" maxlength="60" placeholder="Home to work" required autocomplete="off" />
+      </label>
+      <div id="save-dialog-error" class="error"></div>
+      <div class="dialog-actions">
+        <button type="button" id="save-cancel" class="btn-secondary">Cancel</button>
+        <button type="submit">Save route</button>
+      </div>
+    </form>
+  </dialog>
 
   <button id="panel-reopen" class="icon-btn panel-reopen hidden" title="Show panel" aria-label="Show panel">&raquo;</button>
 

@@ -14,9 +14,7 @@ export interface StationEdge {
 
 /**
  * The full Singapore heavy-rail MRT network (NSL, EWL incl. the Changi
- * Airport branch, CCL, DTL, TEL, NEL) - not the earlier small illustrative
- * subgraph. LRT (Bukit Panjang / Sengkang / Punggol LRT) is intentionally
- * out of scope here; it's a separate light-rail feeder system.
+ * Airport branch, CCL, DTL, TEL, NEL)
  *
  * Coordinates (WGS84) are real station locations sourced from Singapore's
  * OneMap/URA geospatial data via
@@ -32,39 +30,12 @@ export interface StationEdge {
  * shared code, which is how lines meet at a junction.
  *
  * Edge weights are NOT derived from these coordinates (no straight-line/
- * haversine distance anywhere below), and are no longer a flat per-line
- * average either. Each edge's `minutes` is the real, individual
- * station-to-station running time taken from LTA's own official
- * station-running-time diagrams (the "next train" line-diagram signage
- * shown at platforms), stored in `src/reference/` (CCL-SRD-2026.png,
- * NSL-LD.png, EWL-LD-1920x3723.png, "DTL Travel Time_280225.jpg", NEL.jpg,
- * TEL-LD-Stage-5.png). Those diagrams give cumulative travel time from a
- * reference station to every other station on the line; each edge here is
- * the difference between two adjacent stations' cumulative values (or, for
- * the CCL and DTL/NEL diagrams that already label segments directly, that
- * label as-is). This is why segment times vary per hop (e.g. mostly 2 min
- * on the CCL, but 5 min between Botanic Gardens and Caldecott, which has no
- * intermediate station) instead of one flat rate.
+ * haversine distance anywhere below), and not a flat per-line
+ * average either.
  *
  * Three TEL stations shown on the Stage 5 diagram - Mount Pleasant (TE10),
  * Marina South (TE21), and Founders' Memorial (TE22A) - are built but not
- * yet open to the public, so they're intentionally left out of STATIONS;
- * the edges that span them (Caldecott-Stevens, Marina Bay-Gardens by the
- * Bay, Gardens by the Bay-Tanjong Rhu) instead use the combined
- * pass-through time from the diagram. Bedok South (TE30) and Sungei Bedok
- * (TE31) are a further unopened extension, so the TEL here still ends at
- * Bayshore (TE29), matching the live network today.
- *
- * The Changi Airport branch (Tanah Merah - Expo - Changi Airport) uses its
- * own labelled times from the EWL diagram (3 min, then 5 min) rather than
- * the EWL's general rate.
- *
- * Two real, non-sequential connections don't fall out of simply chaining
- * consecutive station codes, so they're appended explicitly at the end of
- * RAW_EDGES: the Changi Airport branch attaches at Tanah Merah (EW4), and
- * the Circle Line loop closes from Bayfront (CC34, the last Stage 6
- * station) back to Promenade (CC4) - Dhoby Ghaut (CC1) through Promenade
- * (CC4) remains a stub off that ring, not part of the loop itself.
+ * yet open to the public, so they're intentionally left out of STATIONS
  */
 export const STATIONS: StationNode[] = [
   { code: "CC2", name: "Bras Basah", lat: 1.296830, lon: 103.850659 },
@@ -291,8 +262,7 @@ const RAW_EDGES: Array<[string, string, string, number]> = [
   ["NS17", "CC16", "CCL", 2],
   // Marymount-Caldecott: the CCL diagram only shows this pair via the long
   // way around the loop (63 min), an artifact of it being a one-direction
-  // "next train" sign - inferred as 2 min by the pattern of every other
-  // directly-labelled CCL hop, not a value read directly off the diagram.
+  // "next train" sign
   ["CC16", "CC17", "CCL", 2],
   ["CC17", "CC19", "CCL", 5],
   ["CC19", "CC20", "CCL", 2],
@@ -412,9 +382,7 @@ export function stationCoords(code: string): { lat: number; lon: number } | null
 /**
  * Matches a bare "lat,lon" pair (e.g. "1.3521,103.8198"), which the reroute
  * endpoint accepts as an alternative to a station name/code so a journey
- * can start/end at an arbitrary door rather than only at a station -
- * door-to-door being the whole point of a "commuter companion", not just
- * platform-to-platform.
+ * can start/end at an arbitrary door rather than only at a station
  */
 export function parseCoordinate(input: string): { lat: number; lon: number } | null {
   const match = input.trim().match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
@@ -443,14 +411,12 @@ export function haversineMeters(
 }
 
 // A brisk urban walking pace (~4.8 km/h) commonly used for first/last-mile
-// transit-access estimates - not measured, just a reasonable planning
-// constant since neither LTA nor OSM is queried for pedestrian routing here.
+// transit-access estimates
 export const WALK_METERS_PER_MINUTE = 80;
 
 // An easy urban cycling pace (~15 km/h, accounting for junctions/crossings,
 // not a fitness-cyclist's cruising speed) for first/last-mile legs beyond
-// comfortable walking distance - same "planning constant, not measured"
-// caveat as WALK_METERS_PER_MINUTE above.
+// comfortable walking distance
 export const CYCLE_METERS_PER_MINUTE = 250;
 
 /**
@@ -474,8 +440,7 @@ export function findNearestStations(
 
 /**
  * Every line serving a station code, derived from EDGES rather than the
- * code's own prefix - an interchange (e.g. Jurong East, "NS1") is served by
- * more than one line even though it only gets a single STATIONS entry.
+ * code's own prefix
  */
 export function findStationLines(code: string): string[] {
   const lines = new Set<string>();

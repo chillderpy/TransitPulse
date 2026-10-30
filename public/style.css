@@ -1,14 +1,16 @@
 :root {
-  --bg: #0f1115;
-  --panel: #171a21;
-  --panel-translucent: rgba(23, 26, 33, 0.96);
-  --border: #2a2e38;
-  --text: #e8eaed;
-  --muted: #8b90a0;
-  --accent: #4f8cff;
-  --danger: #ff5c5c;
-  --success: #2fbf71;
-  --warning: #e6a53c;
+  --bg: #0b1016;
+  --panel: #121923;
+  --panel-translucent: rgba(18, 25, 35, 0.94);
+  --border: #223042;
+  --text: #e9eef5;
+  --muted: #8a99ad;
+  --accent: #2ec4b6;
+  --accent-ink: #04201d;
+  --accent-soft: rgba(46, 196, 182, 0.14);
+  --danger: #ff6b6b;
+  --success: #3ddc97;
+  --warning: #f4b740;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -135,7 +137,7 @@ html, body {
 .route-option-btn:hover { opacity: 1; }
 .route-option-btn.active {
   border-color: var(--accent);
-  background: rgba(79, 140, 255, 0.14);
+  background: var(--accent-soft);
   opacity: 1;
 }
 .route-option-rank { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
@@ -164,12 +166,12 @@ html, body {
   max-width: calc(100vw - 32px);
   background: var(--panel-translucent);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  border-radius: 20px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(10px);
   transition: transform 0.2s ease, opacity 0.2s ease;
   z-index: 1000;
 }
@@ -215,7 +217,15 @@ html, body {
   margin-left: auto;
 }
 
-.brand { font-size: 16px; font-weight: 600; white-space: nowrap; }
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
 .muted { color: var(--muted); font-weight: 400; font-size: 13px; }
 
 .badge {
@@ -236,8 +246,8 @@ html, body {
 
 .tabs {
   display: flex;
-  gap: 2px;
-  padding: 8px 8px 0;
+  gap: 6px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
   flex-shrink: 0;
@@ -245,17 +255,24 @@ html, body {
 
 .tab {
   background: none;
-  border: none;
+  border: 1px solid transparent;
+  border-radius: 999px;
   color: var(--muted);
-  padding: 12px 12px;
-  min-height: 44px;
+  padding: 8px 14px;
+  min-height: 40px;
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
-  border-bottom: 2px solid transparent;
   white-space: nowrap;
 }
-.tab:hover { color: var(--text); }
-.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab:hover {
+  color: var(--text);
+}
+.tab.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
 
 main {
   padding: 16px;
@@ -286,11 +303,11 @@ label {
 }
 
 input, select {
-  background: var(--panel);
+  background: var(--bg);
   border: 1px solid var(--border);
   color: var(--text);
-  padding: 10px 10px;
-  border-radius: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
   /* 16px minimum keeps iOS Safari from auto-zooming the page on focus. */
   font-size: 16px;
   min-height: 44px;
@@ -317,26 +334,27 @@ input, select {
 .pick-btn:hover { opacity: 0.85; }
 .pick-btn.active {
   border-color: var(--accent);
-  background: var(--accent);
+  background: var(--accent-soft);
 }
 #map.picking { cursor: crosshair; }
 
 button {
   background: var(--accent);
-  color: white;
+  color: var(--accent-ink);
   border: none;
   padding: 10px 16px;
-  border-radius: 6px;
+  border-radius: 10px;
   font-size: 15px;
+  font-weight: 600;
   cursor: pointer;
   min-height: 44px;
 }
 button:hover { opacity: 0.9; }
 
 .result {
-  background: var(--panel);
+  background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 14px;
   min-height: 20px;
   font-size: 13px;
@@ -346,7 +364,7 @@ button:hover { opacity: 0.9; }
 .result .error { color: var(--danger); }
 .result .note { color: var(--muted); font-size: 12px; margin-top: 6px; }
 
-/* Used outside .result too (e.g. the manual save-route form's inline error). */
+/* Used outside .result too (e.g. the save-route dialog's inline error). */
 .error { color: var(--danger); font-size: 12px; }
 .error:empty { display: none; }
 
@@ -393,13 +411,18 @@ button:hover { opacity: 0.9; }
 .steps li:last-child { border-bottom: none; }
 
 .summary-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
   margin-bottom: 12px;
-  font-size: 13px;
+  font-size: 11px;
+  color: var(--muted);
 }
-.summary-row b { display: block; font-size: 17px; }
+.summary-row b {
+  display: block;
+  font-size: 16px;
+  color: var(--text);
+}
 
 .pill {
   display: inline-block;
@@ -425,29 +448,33 @@ button:hover { opacity: 0.9; }
 
 .list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
 .list li {
-  background: var(--panel);
+  background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
+  border-radius: 14px;
+  padding: 12px 14px;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 10px;
   font-size: 13px;
+}
+.list li .list-actions {
+  display: flex;
   gap: 8px;
 }
-.list li .list-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .list li button {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text);
-  height: 36px;
-  min-height: 36px;
+  flex: 1;
+  height: 40px;
+  min-height: 40px;
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .list li button.remove {
   border-color: var(--danger);
   color: var(--danger);
+  flex: 0 0 auto;
 }
 
 code {
@@ -457,6 +484,57 @@ code {
   border-radius: 4px;
   font-size: 12px;
 }
+
+/* ---- additions: brand mark, stat tiles, save flow, saved-route cards ---- */
+.brand::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.summary-row > div {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.pill-block { display: block; margin-top: 6px; }
+
+.steps { margin-bottom: 12px; }
+
+.btn-secondary {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+.btn-secondary:disabled { color: var(--muted); border-color: var(--border); cursor: default; }
+.result > .btn-secondary { width: 100%; }
+
+.list li button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.saved-name { font-size: 15px; font-weight: 600; }
+.saved-route { margin-top: 2px; }
+.list li.empty { color: var(--muted); border-style: dashed; text-align: center; }
+
+dialog {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 20px;
+  width: min(360px, calc(100vw - 32px));
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(2px); }
+dialog h3 { margin: 0; font-size: 16px; }
+dialog .col { margin-bottom: 0; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* ---- mobile: a bottom sheet, not a shrunk-down desktop side panel ----
    On a phone the map is the thing you're looking at (a moving train, one

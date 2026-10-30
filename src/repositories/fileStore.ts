@@ -4,7 +4,7 @@ import path from "path";
 // Deliberately simple: synchronous read on startup, synchronous write after
 // every mutation. This is a single-process demo backend with light write
 // volume (saved routes), not a service that needs a write queue or a real
-// database - just enough that data survives `npm run dev` restarting.
+// database
 const DATA_DIR = path.join(process.cwd(), "data");
 
 function ensureDataDir(): void {
@@ -12,8 +12,7 @@ function ensureDataDir(): void {
 }
 
 // Under the test runner, repositories built on this store should behave
-// like the plain in-memory Maps they used to be - no reading real data on
-// disk, and no leaving test fixtures behind that the next run would load.
+// like the plain in-memory Maps they used to be
 const PERSISTENCE_DISABLED = !!process.env.VITEST;
 
 export function loadJsonFile<T>(fileName: string, fallback: T): T {

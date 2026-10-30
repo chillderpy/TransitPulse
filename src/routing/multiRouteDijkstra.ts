@@ -42,11 +42,7 @@ import { buildAdjacency, hopKey, PathResult, shortestPathOnAdjacency, START_LINE
  * unchanged), but only kept in the returned set if their *mode signature*
  * (the sequence of lines/modes ridden, collapsing consecutive same-line
  * hops and ignoring which specific stop within a mode was used - see
- * modeSignature) hasn't already been returned - a near-duplicate is
- * skipped, but the search keeps spurring off it (and off every other
- * generated candidate) exactly as Yen's algorithm would, so a genuinely
- * different route further down the ranking still gets found rather than
- * the whole search stalling on one corridor.
+ * modeSignature) hasn't already been returned
  */
 export function kShortestPaths(
   edges: StationEdge[],
@@ -61,13 +57,9 @@ export function kShortestPaths(
   const first = shortestPathOnAdjacency(adjacency, from, to, boardingPenaltyMinutes);
   if (!first) return [];
 
-  // Every loopless shortest path generated so far, in rank order - Yen's
-  // algorithm needs the true next-best path to keep spurring from
-  // correctly, regardless of whether it ends up being diverse enough to
-  // return, so this can't be limited to just the diverse subset.
+  // Every loopless shortest path generated so far, in rank order
   const found: PathResult[] = [first];
-  // The subset of `found` with distinct mode signatures - this is what
-  // actually gets returned.
+  // The subset of `found` with distinct mode signatures
   const diverse: PathResult[] = [first];
   const seenModeSignatures = new Set<string>([modeSignature(first)]);
 
@@ -76,8 +68,7 @@ export function kShortestPaths(
 
   // Bounds worst-case cost: without a cap, a corridor with many redundant
   // near-duplicate candidates (see above) could force Yen's algorithm
-  // through a very large number of spur searches - each a full Dijkstra run
-  // over the live graph - before turning up k diverse results.
+  // through a very large number of spur searches
   const maxCandidates = options.maxCandidates ?? Math.max(k * 4, 8);
 
   while (diverse.length < k && found.length < maxCandidates) {
@@ -165,10 +156,7 @@ function arraysEqual(a: string[], b: string[]): boolean {
  * Re-derives every hop's ride/wait cost for a full stitched path, so a
  * route assembled from a root prefix + a spur path (each costed
  * independently, starting the spur "fresh" with no known arrival line)
- * reports the boarding pattern the rider would actually experience -
- * notably, whether the hop right at the join is a free continuation or a
- * fresh boarding depends on the root prefix's arrival line, which the spur
- * search itself had no way to know.
+ * reports the boarding pattern the rider would actually experience
  */
 function recomputeHopCosts(
   edges: StationEdge[],

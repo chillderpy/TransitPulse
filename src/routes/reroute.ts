@@ -11,8 +11,6 @@ const bodySchema = z.object({
   origin: z.string().min(1),
   destination: z.string().min(1),
   persona: z.enum(["standard", "accessible"]).optional(),
-  // ISO 8601 timestamp for a "what if I leave at..." query, mirroring
-  // Google Maps' depart-at picker; omitted means "leave now".
   departAt: z.string().datetime({ offset: true }).optional(),
   // Demo/showcase-only: names a canned disruption scenario (see
   // src/services/mockDisruptions.ts) to feed the planner instead of live LTA

@@ -115,9 +115,7 @@ async function buildBusGraph(): Promise<BusGraph> {
   }
 
   // Walking transfers between a bus stop and any MRT station close enough
-  // to change modes on foot - this is what lets a route hop from a bus leg
-  // onto the rail network (or vice versa) rather than treating them as two
-  // disconnected graphs.
+  // to change modes on foot
   for (const stop of stops.values()) {
     for (const station of STATIONS) {
       const distanceMeters = haversineMeters(stop.lat, stop.lon, station.lat, station.lon);
@@ -134,9 +132,7 @@ async function buildBusGraph(): Promise<BusGraph> {
 /**
  * Lazily builds and caches the bus-stop graph (a real fetch across ~5,200
  * stops and ~27,000 route entries, so the first call after server start
- * takes several seconds - subsequent calls within the TTL are instant).
- * Any caller failure (no LTA key, network error) should be treated by the
- * caller as "no bus data available" rather than fatal.
+ * takes several seconds
  */
 export async function getBusGraph(): Promise<BusGraph> {
   if (cached && Date.now() - cached.builtAt < CACHE_TTL_MS) return cached;

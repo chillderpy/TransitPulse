@@ -2,8 +2,7 @@ import { fetchLta } from "../lta/client";
 import { LTA_ENDPOINTS } from "../lta/endpoints";
 
 // Confirmed against the live endpoint (2026-09-17): each entry is a lift
-// currently out of service, not a maintenance schedule - LTA calls the
-// dataset "FacilitiesMaintenance" but it's really "faulty lifts right now".
+// currently out of service, not a maintenance schedule
 interface LtaFacilityMaintenanceItem {
   Line?: string;
   StationCode?: string;

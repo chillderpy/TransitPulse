@@ -6,11 +6,7 @@ import { asyncHandler } from "../middleware/errorHandler";
 // PMTiles build server via ranged HTTP GETs (see public/app.js). That works
 // fine from Node but never from a browser: build.protomaps.com doesn't send
 // Access-Control-Allow-Origin on any response (success or error), so every
-// browser blocks it as a CORS failure regardless of network - the app was
-// silently falling back to OpenStreetMap's raster tiles for every single
-// user, which some networks/browsers also block, leaving the map fully
-// blank there. Proxying the ranged reads through our own origin sidesteps
-// CORS entirely and removes that OSM dependency for the common case.
+// browser blocks it as a CORS failure regardless of network
 export const basemapRouter = Router();
 
 const DATE_PATTERN = /^\d{8}$/;

@@ -62,6 +62,22 @@ describe("app", () => {
     15000
   );
 
+  it("POST /api/reroute rejects a coordinate outside Singapore with 422", async () => {
+    const res = await request(app)
+      .post("/api/reroute")
+      .send({ origin: "1.4927,103.7414", destination: "Raffles Place" }); // Johor Bahru
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/outside Singapore/);
+  });
+
+  it("POST /api/saved-routes rejects a coordinate outside Singapore with 400", async () => {
+    const res = await request(app)
+      .post("/api/saved-routes")
+      .set("X-Device-Id", TEST_DEVICE_ID)
+      .send({ originStation: "Jurong East", destinationStation: "1.13,104.05" }); // Batam
+    expect(res.status).toBe(400);
+  });
+
   it("GET /api/train-alerts returns 503 when LTA_ACCOUNT_KEY is unset", async () => {
     const res = await request(app).get("/api/train-alerts");
     expect(res.status).toBe(503);

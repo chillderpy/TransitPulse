@@ -4,9 +4,7 @@ import { getActivePlannedRoadWorks } from "../services/roadWorksService";
 
 export const disruptionsRouter = Router();
 
-// Planned disruptions (roadworks) as distinct from live TrainServiceAlerts -
-// PS2 calls this out separately ("a downpour", "planned closures") as a
-// signal commuters need advance notice of, not just live incident status.
+// Planned disruptions (roadworks) as distinct from live TrainServiceAlerts
 disruptionsRouter.get(
   "/planned",
   asyncHandler(async (req, res) => {

@@ -2,8 +2,7 @@ import { StationEdge } from "./graph";
 
 /**
  * Singapore has no DST and a fixed UTC+8 offset, but the server process
- * itself could run in any timezone - so "is it 8am" has to be asked in
- * Singapore local time explicitly rather than via the server's own clock.
+ * itself could run in any timezone
  */
 const SGT_TIMEZONE = "Asia/Singapore";
 
@@ -44,7 +43,7 @@ export const TIME_PERIOD_LABELS: Record<TimePeriod, string> = {
 // Boundaries follow LTA's own commonly-cited weekday peak windows
 // (roughly 7:30-9:30am and 5:30-8pm); night runs 11pm-5am, when MRT/bus
 // frequencies drop to their lowest and road traffic is lightest. Everything
-// else - including all-day weekends - is off-peak. These are planning-grade
+// else including all-day weekends is off-peak. These are planning-grade
 // bands, not measured traffic data (same spirit as the per-hop minutes in
 // graph.ts and busGraph.ts).
 const NIGHT_START = 23 * 60;
@@ -67,11 +66,7 @@ export function classifyPeriod(date: Date = new Date()): TimePeriod {
 }
 
 // MRT trains run on fixed guideways, so peak/off-peak doesn't slow the
-// running time itself the way road traffic does - the effect here is
-// smaller and comes from crowding-lengthened station dwell times at peak,
-// and from longer waits between trains (wider headways) late at night.
-// Buses share the road with everyone else, so congestion swings their
-// travel time much harder in both directions.
+// running time itself the way road traffic does
 const MRT_MULTIPLIERS: Record<TimePeriod, number> = {
   amPeak: 1.05,
   pmPeak: 1.05,
@@ -96,7 +91,7 @@ export function speedMultiplier(line: string, period: TimePeriod): number {
 // Neither buses nor trains arrive the instant you reach the stop/platform -
 // boarding one means waiting out some fraction of its headway first. LTA
 // doesn't publish per-service headways as machine-readable data (same gap
-// as the per-hop minutes above), so these are planning-grade averages of
+// as the per-hop minutes above), so these are hardcoded planning-grade averages of
 // half the typical headway at each period, not measured figures:
 //  - MRT: ~2-3 min peak headway, ~5-7 min off-peak, ~10-12 min near closing.
 //  - Bus: ~8-10 min peak headway, ~12-15 min off-peak, ~20+ min late night
@@ -119,7 +114,7 @@ const BUS_WAIT_MINUTES: Record<TimePeriod, number> = {
   offPeak: 7,
 };
 
-/** Average wait to board `line` if you just arrived (on foot, or via a different line) at `period`. WALK/CYCLE never wait - you set off the moment you start. */
+/** Average wait to board `line` if you just arrived (on foot, or via a different line) at `period`. WALK/CYCLE never wait. */
 export function boardingWaitMinutes(line: string, period: TimePeriod): number {
   if (line === "WALK" || line === "CYCLE") return 0;
   if (line.startsWith("BUS:")) return BUS_WAIT_MINUTES[period];
