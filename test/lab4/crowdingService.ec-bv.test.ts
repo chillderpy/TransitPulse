@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 
 // Keep the real LtaNotConfiguredError etc.; only replace the network call.
-vi.mock("../src/lta/client", async (importOriginal) => ({
+vi.mock("../../src/lta/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/lta/client")>()),
   fetchLta: vi.fn(),
 }));

@@ -18,14 +18,14 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../src/services/trainAlertsService", () => ({ getTrainAlerts: vi.fn() }));
-vi.mock("../src/services/facilitiesService", () => ({ getLiftOutages: vi.fn() }));
-vi.mock("../src/services/weatherService", () => ({ getWeatherNear: vi.fn() }));
-vi.mock("../src/services/crowdingService", async (importOriginal) => ({
+vi.mock("../../src/services/trainAlertsService", () => ({ getTrainAlerts: vi.fn() }));
+vi.mock("../../src/services/facilitiesService", () => ({ getLiftOutages: vi.fn() }));
+vi.mock("../../src/services/weatherService", () => ({ getWeatherNear: vi.fn() }));
+vi.mock("../../src/services/crowdingService", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/crowdingService")>()),
   getNetworkCrowding: vi.fn(),
 }));
-vi.mock("../src/routing/routePlanner", async (importOriginal) => ({
+vi.mock("../../src/routing/routePlanner", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/routing/routePlanner")>()),
   routePlanner: { suggest: vi.fn() },
 }));

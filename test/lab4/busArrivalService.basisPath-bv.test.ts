@@ -20,14 +20,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
  
-vi.mock("../src/lta/client", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../src/lta/client")>()),
+vi.mock("../../src/lta/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lta/client")>()),
   fetchLta: vi.fn(),
 }));
  
-import { fetchLta } from "../src/lta/client";
-import { getBusArrivals } from "../src/services/busArrivalService";
-import { createApp } from "../src/app";
+import { fetchLta } from "../../src/lta/client";
+import { getBusArrivals } from "../../src/services/busArrivalService";
+import { createApp } from "../../src/app";
  
 const NOW = new Date("2026-10-29T10:00:00.000Z");
  
