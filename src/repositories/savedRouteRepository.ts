@@ -5,13 +5,7 @@ import { loadJsonFile, saveJsonFile } from "./fileStore";
 const FILE_NAME = "saved-routes.json";
 
 /**
- * File-backed saved-routes store (see fileStore.ts) - the write-up's
- * planned "persistent storage" for the piece the mock frontend claims but
- * doesn't actually have (the save form and the saved list aren't wired
- * together in the current Flutter code). Good enough that a route survives
- * a server restart without a real database; swap for one once routes need
- * to be shared across devices for the same account or scale past one
- * process's disk.
+ * File-backed saved-routes store (see fileStore.ts) 
  */
 class SavedRouteRepository {
   private routes = new Map<string, SavedRouteDto>(

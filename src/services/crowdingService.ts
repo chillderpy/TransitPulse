@@ -10,9 +10,7 @@ import { TrainLineCode } from "../lta/endpoints";
 import { crowdReportRepository } from "../repositories/crowdReportRepository";
 import { findStationCode, findStationLines } from "../routing/graph";
 
-// The heavy-rail lines the route planner actually covers (see graph.ts) -
-// LRT lines are out of scope network-wide, same as everywhere else in this
-// codebase, so there's no point querying PCDRealTime for them here.
+// The heavy-rail lines the route planner actually covers (see graph.ts)
 const ROUTED_TRAIN_LINES: TrainLineCode[] = ["NSL", "EWL", "CCL", "DTL", "TEL", "NEL"];
 
 export class UnknownStationError extends Error {
@@ -43,8 +41,7 @@ function toDtoLevel(level: CrowdLevel | string | undefined): CrowdLevelDto {
 export async function getStationCrowding(station: string): Promise<StationCrowdingDto> {
   // LTA's crowd feeds key entries by station code (e.g. "NS1") and are
   // queried per line, while the app just takes a station name or code from
-  // the user - so resolve the code, then figure out which line(s) actually
-  // serve it (an interchange like Jurong East serves more than one).
+  // the user
   const stationCode = findStationCode(station);
   if (!stationCode) throw new UnknownStationError(station);
 
@@ -108,17 +105,13 @@ export async function getStationCrowding(station: string): Promise<StationCrowdi
 }
 
 export function reportCrowding(input: CrowdReportInput) {
+  if (!findStationCode(input.station)) throw new UnknownStationError(input.station);
   return crowdReportRepository.add(input.station, input.level);
 }
 
 /**
  * Live crowding level for every station currently reporting one, across all
- * routed lines at once - used by the route planner to steer away from
- * highly-crowded platforms, not just line disruptions. One PCDRealTime call
- * per line (6 total), same feed getStationCrowding uses for a single
- * station, just fetched network-wide and merged into a lookup map. A failed
- * or empty line simply contributes no entries rather than failing the
- * whole lookup - crowding is a routing enhancement, not a hard requirement.
+ * routed lines at once
  */
 export async function getNetworkCrowding(): Promise<Map<string, CrowdLevelDto>> {
   const perLine = await Promise.all(

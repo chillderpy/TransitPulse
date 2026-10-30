@@ -39,12 +39,8 @@ export const MOCK_DISRUPTION_SCENARIOS = {
     ],
     fetchedAt: new Date(0).toISOString(),
   },
-  // Built for the Rachel persona (WRITEUP.md) - a fixed-schedule EWL
-  // commuter riding Tampines -> Raffles Place. Unlike ewlBuonaVista above
-  // (which sits on the Jurong side of the line and never touches her
-  // route), this cuts the EWL directly across the stretch she actually
-  // rides, so it's the scenario to demo "does this actually affect Rachel"
-  // against rather than a disruption that happens to leave her alone.
+  // Built for a persona that takes a fixed-schedule EWL
+  // commuter riding Tampines -> Raffles Place. This disruption cuts the EWL directly across the stretch they actually ride
   ewlPayaLebarBugis: {
     overallStatus: "disrupted",
     generalAdvisories: [],

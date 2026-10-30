@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../middleware/errorHandler";
 import { notificationSubscriptionRepository } from "../repositories/notificationSubscriptionRepository";
+import { isPublicWebhookUrl } from "../security/webhookUrl";
 
 export const notificationsRouter = Router();
 
@@ -19,6 +20,10 @@ notificationsRouter.post(
   "/subscribe",
   asyncHandler(async (req, res) => {
     const input = subscribeSchema.parse(req.body);
+    if (!(await isPublicWebhookUrl(input.webhookUrl))) {
+      res.status(400).json({ error: "webhookUrl must be an https URL that resolves to a public address" });
+      return;
+    }
     const subscription = notificationSubscriptionRepository.add(input);
     res.status(201).json(subscription);
   })

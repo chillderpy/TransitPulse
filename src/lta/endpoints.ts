@@ -2,13 +2,6 @@
  * LTA DataMall endpoint paths, relative to env.ltaBaseUrl
  * (https://datamall2.mytransport.sg/ltaodataservice).
  *
- * IMPORTANT: verify these against the current official API User Guide PDF
- * at https://datamall.lta.gov.sg before relying on this in production - this
- * sandbox's network egress blocks datamall.lta.gov.sg, so these paths were
- * confirmed via secondary sources (package docs, migration announcements)
- * rather than the primary PDF. LTA migrated Bus Arrival from the legacy
- * `BusArrivalv2` path to `v3/BusArrival` in mid-2025; if your account key
- * predates that and v3 rejects your calls, fall back to BUS_ARRIVAL_LEGACY.
  */
 export const LTA_ENDPOINTS = {
   BUS_ARRIVAL: "v3/BusArrival",

@@ -5,14 +5,16 @@ import { getNetworkCrowding } from "./crowdingService";
 import { routePlanner } from "../routing/routePlanner";
 import { parseCoordinate, stationCoords, findStationCode } from "../routing/graph";
 import { CrowdLevelDto, Persona, RerouteSuggestionDto, TrainAlertsDto } from "../types/api";
-import { LtaNotConfiguredError } from "../lta/client";
+import { LtaApiError, LtaNotConfiguredError } from "../lta/client";
 import { MOCK_DISRUPTION_SCENARIOS, MockDisruptionScenario } from "./mockDisruptions";
+import { outOfBoundsMessage } from "../geo/endpointValidation";
 
 const NO_KNOWN_DISRUPTIONS: TrainAlertsDto = {
   overallStatus: "normal",
   lines: [],
   generalAdvisories: [],
   fetchedAt: new Date(0).toISOString(),
+  dataStatus: "unavailable",
 };
 
 function resolvePointForWeather(input: string): { lat: number; lon: number } | null {
@@ -29,10 +31,26 @@ export async function suggestReroute(
   departAt?: Date,
   mockDisruption?: MockDisruptionScenario
 ): Promise<RerouteSuggestionDto | { error: string }> {
+  // Reject a "lat,lon" origin/destination that falls outside Singapore (Johor,
+  // Batam, open sea) up front, before any LTA / weather calls are made. The
+  // route handler turns this { error } into a 422, same as an unknown station.
+  const boundaryError = outOfBoundsMessage(origin, destination);
+  if (boundaryError) return { error: boundaryError };
+
+  // Fail fast on a name/code we can't place on the graph, before any LTA / weather calls.
+  const originPoint = resolvePointForWeather(origin);
+  if (!originPoint) {
+    return { error: `Unknown origin "${origin}". Use a station name/code, or a "lat,lon" pair within Singapore.` };
+  }
+  const destPoint = resolvePointForWeather(destination);
+  if (!destPoint) {
+    return { error: `Unknown destination "${destination}". Use a station name/code, or a "lat,lon" pair within Singapore.` };
+  }
+
   // The routing math itself doesn't need LTA, only the disruption check
-  // does - so a missing account key degrades to "assume no disruptions"
-  // instead of failing the whole endpoint. A real LTA error (rate limit,
-  // outage) still propagates as a 502, since that's worth surfacing.
+  // does - so a missing key or an LTA error with no earlier reading to fall
+  // back on degrades to "assume no disruptions", flagged as unavailable in
+  // the response, instead of failing the whole endpoint at rush hour.
   // Weather and lift-outage data are pure enrichment: any failure there
   // (including no LTA key) just means the response omits that advisory
   // rather than failing the whole reroute.
@@ -43,7 +61,7 @@ export async function suggestReroute(
   const alertsPromise: Promise<TrainAlertsDto> = mockDisruption
     ? Promise.resolve(MOCK_DISRUPTION_SCENARIOS[mockDisruption])
     : getTrainAlerts().catch((err) => {
-        if (err instanceof LtaNotConfiguredError) return NO_KNOWN_DISRUPTIONS;
+        if (err instanceof LtaNotConfiguredError || err instanceof LtaApiError) return NO_KNOWN_DISRUPTIONS;
         throw err;
       });
   const liftOutagesPromise = getLiftOutages().catch(() => []);
@@ -51,14 +69,8 @@ export async function suggestReroute(
   // (no LTA key, network error) just means the route is planned without a
   // crowding bias rather than failing the whole reroute request.
   const crowdingPromise = getNetworkCrowding().catch(() => new Map<string, CrowdLevelDto>());
-  const originPoint = resolvePointForWeather(origin);
-  const destPoint = resolvePointForWeather(destination);
-  const originWeatherPromise = originPoint
-    ? getWeatherNear(originPoint.lat, originPoint.lon).catch(() => null)
-    : Promise.resolve(null);
-  const destWeatherPromise = destPoint
-    ? getWeatherNear(destPoint.lat, destPoint.lon).catch(() => null)
-    : Promise.resolve(null);
+  const originWeatherPromise = getWeatherNear(originPoint.lat, originPoint.lon).catch(() => null);
+  const destWeatherPromise = getWeatherNear(destPoint.lat, destPoint.lon).catch(() => null);
 
   const [alerts, liftOutages, originWeather, destinationWeather, crowding] = await Promise.all([
     alertsPromise,

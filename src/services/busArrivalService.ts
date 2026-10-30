@@ -24,19 +24,13 @@ function toEta(estimatedArrival: string): { etaSeconds: number | null; etaMinute
 }
 
 // LTA sets Monitored=0 when a bus has no live GPS fix yet, and fills
-// Latitude/Longitude with "0.0" rather than omitting them - which is a real
-// coordinate (off the coast of Africa, nowhere near Singapore), not a null
-// one. Trusting it at face value is how a bus stop card ends up plotting a
-// marker in the Gulf of Guinea. Both the Monitored flag and a sentinel
-// (0, 0) check are guarded here since either could show up alone.
+// Latitude/Longitude with "0.0" rather than omitting them
 function toLatLon(bus: LtaBusArrivalNextBus): { latitude: number | null; longitude: number | null } {
   if (bus.Monitored < 1) return { latitude: null, longitude: null };
   const lat = Number(bus.Latitude);
   const lon = Number(bus.Longitude);
   // Number() on "" or whitespace coerces to 0 rather than NaN, and on a
-  // garbled/non-numeric payload it's NaN rather than null - neither of
-  // which the old null-only check caught, letting bad coordinates (and,
-  // for NaN, an "Invalid LatLng" crash in the map) reach the client.
+  // garbled/non-numeric payload it's NaN rather than null
   if (!Number.isFinite(lat) || !Number.isFinite(lon) || (lat === 0 && lon === 0)) {
     return { latitude: null, longitude: null };
   }

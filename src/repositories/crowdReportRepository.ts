@@ -10,13 +10,9 @@ export interface CrowdReport {
 
 const REPORT_TTL_MS = 15 * 60 * 1000;
 
-/**
- * In-memory store for crowdsourced "report crowding here" submissions.
- * Swap for a real database (the write-up's planned "persistent storage")
- * once this needs to survive a restart or scale beyond one process; the
- * interface below (add/listActiveForStation) is what a DB-backed
- * implementation should preserve.
- */
+
+// In-memory store for crowdsourced "report crowding here" submissions.
+
 class CrowdReportRepository {
   private reports: CrowdReport[] = [];
 

@@ -3,13 +3,9 @@
 Node.js/TypeScript API that wraps LTA DataMall's live datasets (bus arrivals,
 train service alerts, platform crowd density) plus app-side state the app
 needs but LTA doesn't provide (saved routes, crowdsourced crowding reports,
-a disruption-aware reroute suggestion). It also serves a mobile-first web
+a disruption-aware reroute suggestion). It also serves a mobile web
 front end (`public/`) directly from this server — see
 [What to click first](#what-to-click-first) below.
-
-## Demo
-
-📺 **Demo video:** [https://youtu.be/iGDjul3ArM4]
 
 ## Prerequisites
 
@@ -39,9 +35,7 @@ and the live half of `/api/crowding` return `503` until the key is set.
 
 ### Opening it on a real phone
 
-This is a mobile-first web app, so it's worth checking on an actual phone
-rather than only a resized desktop window. The server listens on all network
-interfaces, so any device on the same Wi-Fi can reach it directly — no
+The server listens on all network interfaces, so any device on the same Wi-Fi can reach it directly — no
 tunnel or extra config needed:
 
 ```bash
@@ -64,37 +58,18 @@ npx localtunnel --port 3000
 ## Deploying to Render
 
 `render.yaml` defines this as a single Render **web service** (build:
-`npm install && npm run build`, start: `npm start`) - Render's "New +
-Blueprint" flow (Dashboard → New → Blueprint, pointing at this repo) picks
-it up directly. It pre-sets `CORS_ORIGIN=*` and
-`ENABLE_MOCK_DISRUPTIONS=false`; `LTA_ACCOUNT_KEY` is marked `sync: false`,
-so you still need to set it yourself under the service's Environment tab
-(without it, the deployed app behaves exactly like running locally with no
-key - see above). `PORT` doesn't need setting - Render injects its own and
-`src/config/env.ts` already reads `process.env.PORT`.
-
-**Free-tier cold starts.** On Render's free plan the service spins down
-after ~15 minutes idle, and the next request can take 30-60s to cold-boot.
-The frontend accounts for this: `callApi()` in `public/app.js` uses a 55s
-request timeout (long enough to survive a cold start, instead of a short
-timeout misreporting a merely-slow server as "no connection") and shows a
-"Waking up the server…" banner after 4s of waiting so the delay doesn't
-look like a hang. Deploying on a plan without spin-down just means that
-banner rarely appears.
+`npm install && npm run build`, start: `npm start`)
 
 ## What to click first
 
 Open `http://localhost:3000` (or `http://<lan-ip>:3000` on a phone — see
-above) after `npm run dev`. The **Reroute** tab is the golden path — it's
-pre-filled with Rachel's persona journey (Jurong East → Raffles Place).
-Press **Get route** to see a live, disruption-aware itinerary rendered on
-the map, with the usual route shown alongside the live one and any avoided
-segment highlighted. Switch the persona dropdown to **Accessibility-first**
-to see the same journey re-planned with a shorter walk-in radius and
-lift-outage warnings for Mdm Lim.
+above) after `npm run dev`.
 
-The other tabs (bus arrivals, train alerts, crowding, saved routes) are
-straightforward forms over the corresponding API endpoint below.
+After getting a route, **Save route** asks for a name and files it under the
+**Saved routes** tab, which lists saved routes only; **Check route** there
+re-runs the reroute for that journey. The other tabs (bus arrivals, train
+alerts, crowding) are straightforward forms over the corresponding API
+endpoint below.
 
 ## Endpoints
 
@@ -117,7 +92,9 @@ straightforward forms over the corresponding API endpoint below.
 
 `origin`/`destination` each accept either a station name/code ("Jurong
 East", "NS1") **or** a bare `"lat,lon"` pair, so a journey can start/end at
-an arbitrary door rather than only at a platform. A coordinate input walks
+an arbitrary door rather than only at a platform. A coordinate input must fall within Singapore (an approximate boundary polygon in
+`src/geo/singaporeBoundary.ts`); anything outside, e.g. Johor Bahru or Batam, is
+rejected with a `422` (`400` on `POST /api/saved-routes`). A coordinate input walks
 to any station *or bus stop* within 1200m (600m for the `accessible`
 persona), and additionally offers cycling out to 3000m (standard persona
 only - accessible mode is about reducing physical effort, so it skips
@@ -185,6 +162,14 @@ shortens the walk-in radius, skips cycling, and cross-references the live
 not a maintenance schedule, despite its name) against every station on the
 route, surfacing an `accessibilityWarnings` entry for each one.
 
+`disruptionDataStatus` says what the disruption check was based on: `live`,
+`stale` (LTA errored, so the last good reading was used) or `unavailable` (no
+key, or LTA errored with no earlier reading - "no disruptions" is then an
+assumption). The reroute endpoint no longer returns `502` for an LTA alerts
+outage, since a rush-hour commuter is better served by a flagged route than
+by none. Displayed minutes are real travel time: the crowding penalty only
+steers which route is chosen.
+
 The response also includes: `confidenceRangeMinutes` (a range, not one
 falsely-precise number, since live transit timing always has some slop);
 `usualPath`/`livePath`/`avoidedSegments` as `[lat, lon]` coordinates for
@@ -197,8 +182,7 @@ request).
 ### Proactive alerts: webhook subscriptions
 
 A backend can't push an actual phone notification without a mobile push
-provider (FCM/APNs) and device tokens, which is outside this project's
-scope. A webhook is the equivalent server-to-server building block:
+provider (FCM/APNs) and device tokens. A webhook is the equivalent server-to-server building block:
 `POST /api/notifications/subscribe` with a `webhookUrl` and, optionally,
 the lines/stations to watch (omit both to watch everything). A background
 poller (`src/services/notificationService.ts`, started only by the real
@@ -208,104 +192,7 @@ server in `server.ts`, not by tests) checks `TrainServiceAlerts` and
 the moment something *newly* becomes disrupted - not on every poll, only on
 a state change, since that's the "proactive" part.
 
-## Known limitations - read before demoing
-
-**There is no public LTA DataMall endpoint for real-time MRT/LRT arrival
-ETAs** (the "2 min" / "5 min" per-platform countdown the app's home screen
-mockup shows). LTA's live Bus Arrival API gives genuine per-vehicle ETAs,
-but the equivalent for trains doesn't exist in DataMall - only
-`TrainServiceAlerts` (service status) and platform crowd density are
-published for rail. If the home screen needs a "next train" figure, the
-realistic options are: (a) show bus ETAs where the leg is a bus, (b) show
-line status + a rough scheduled-frequency estimate for rail legs (LTA
-publishes typical peak/off-peak headways, not live ETAs), or (c) be explicit
-in the UI that train timing is an estimate, not live. This wasn't something
-to quietly work around - it changes what "real-time arrivals" can honestly
-mean for the rail half of a journey.
-
-**LTA endpoint paths and schemas below have been confirmed against the live
-API** (verified 2026-09-17, using the account key in `.env`): `v3/BusArrival`,
-`v2/FacilitiesMaintenance` (returns currently-faulty lifts, not a maintenance
-calendar, despite the name), `RoadWorks`, `BusStops`, and `BusRoutes` all
-match what `src/lta/endpoints.ts` and the corresponding services assume. If
-your own account key predates LTA's mid-2025 migration off `BusArrivalv2`
-and `v3/BusArrival` 404s, fall back to `BUS_ARRIVAL_LEGACY` in that same
-file.
-
-**Saved routes are file-backed** (`data/saved-routes.json`, via
-`src/repositories/fileStore.ts` - synchronous read on startup, write after
-every mutation; fine for a single-process demo backend, not for multiple
-instances sharing state). **Crowd reports and notification subscriptions
-stay in-memory on purpose**: a crowd report already expires after 15
-minutes, and a webhook subscription only matters while its owner's client
-is running to receive it, so neither needs to survive a restart the way a
-saved route does. All three repositories sit behind a small interface so
-swapping any of them for a real database later doesn't touch the
-route/service layer.
-
-**No account system.** Saved routes are scoped by a client-supplied
-`X-Device-Id` header (a UUID the app generates once via
-`crypto.randomUUID()` and persists locally - see `public/app.js`). The
-server now rejects a non-UUID device id outright: since this header is the
-*only* access control on saved routes, a short/guessable value would let
-one client stumble into another's routes, where a random UUID's keyspace
-makes that practically impossible. This is still not real authentication -
-anyone who obtains a specific UUID can access that device's routes - just
-a meaningfully harder-to-guess identifier than an arbitrary string.
-
-**Not implemented, deliberately, as genuinely out of scope for this
-backend**: an AI/LLM layer (structured advice from free text, personalised
-duration prediction, a conversational interface) - optional per the brief,
-and nothing here would be more than a thin wrapper without real usage data
-to ground it; historical origin-destination passenger volume (`PV/*`) as an
-"unusual crowd" baseline - LTA publishes this as large monthly CSV/zip
-downloads, not a queryable API, which is a data-engineering job in its own
-right; and OneMap/data.gov.sg geospatial layers (`CoveredLinkWay`,
-`TrainStationExit`, `CyclingPath`, `Footpath`) - these are shapefile/KML
-GIS datasets requiring their own parsing pipeline, not JSON endpoints like
-everything else this backend consumes.
-
-## Architecture notes
-
-- `src/lta/client.ts` - single fetch wrapper for all DataMall calls: adds
-  the `AccountKey` header, caches responses per-endpoint at a TTL matched to
-  how often LTA actually refreshes that dataset (15s for bus arrivals, ~1min
-  for alerts, ~30min for crowd density - the last matching the 30-min
-  staleness the write-up's crowding screen already displays), and converts
-  non-200s/network errors into typed errors the route layer turns into
-  proper HTTP status codes (`503` not configured, `502` upstream failure).
-- `src/services/*` - one file per domain, converts LTA's PascalCase schema
-  into the DTOs in `src/types/api.ts`.
-- `src/routing/graph.ts` - the rail network (stations/edges), haversine and
-  coordinate-parsing helpers, and the door-to-door walk-in radius logic.
-- `src/routing/busGraph.ts` - the lazily-built, 6h-cached bus-stop graph
-  (`BusStops` + `BusRoutes`, joined to rail via transfer walk edges).
-- `src/routing/dijkstra.ts` - binary-heap Dijkstra (needed once the bus
-  graph's thousands of nodes are merged in), boarding-wait/line-continuation
-  cost model, and the shared adjacency-map builder `multiRouteDijkstra.ts`
-  also uses.
-- `src/routing/multiRouteDijkstra.ts` - Yen's k-shortest-paths algorithm on
-  top of `dijkstra.ts`'s single-path search, returning up to k distinct,
-  ranked route alternatives instead of one.
-- `src/routing/timeOfDay.ts` - peak/off-peak/night classification (Singapore
-  local time), the resulting speed/wait multipliers, and first/last-train
-  and first/last-bus service-hours cutoffs.
-- `src/routing/routePlanner.ts` - defines the `RoutePlanner` interface,
-  merges the rail and bus graphs per request, resolves station/coordinate
-  endpoints, applies the crowding-boarding penalty, and builds the
-  rider-facing itinerary (collapsing same-line hops into one "ride" step)
-  for each of the ranked route options.
-- `src/repositories/*` - saved routes (file-backed, see above),
-  crowdsourced crowding reports and notification subscriptions
-  (in-memory), each behind a small interface.
-- `src/services/weatherService.ts` - data.gov.sg's 2-hour forecast (a
-  separate public host, no key, its own small cache/timeout) used only to
-  attach a rain advisory to walking legs.
-- `src/services/facilitiesService.ts` / `roadWorksService.ts` - LTA's
-  currently-faulty-lifts and active-roadworks feeds, the "planned
-  disruption" signals surfaced via accessibility warnings and
-  `/api/disruptions/planned` respectively.
-- `src/services/notificationService.ts` - the proactive-alert poller
-  described above.
-- `src/services/mockDisruptions.ts` - canned `TrainAlertsDto` fixtures for
-  the demo-only `mockDisruption` reroute param described above.
+`webhookUrl` must be an `https` URL that resolves to a public address (checked
+at subscribe time and before each delivery; redirects are not followed). A
+failed LTA poll is skipped rather than treated as "all clear", so an outage
+can't cause already-known incidents to be re-announced.

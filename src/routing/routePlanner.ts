@@ -36,12 +36,7 @@ const WALK_RADIUS_METERS: Record<Persona, number> = {
 };
 
 // A wider first/last-mile radius offered via cycling, on top of (not
-// instead of) the walk radius above - the planner still generates walk
-// edges within WALK_RADIUS_METERS, and additionally offers cycle edges out
-// to CYCLE_RADIUS_METERS, letting Dijkstra pick whichever mode is actually
-// faster for that particular distance. The accessible persona gets no
-// cycling: it's aimed at reducing physical effort and shorter walks, not
-// bringing in a mode that demands more of it.
+// instead of) the walk radius above 
 const CYCLE_RADIUS_METERS: Record<Persona, number> = {
   standard: 3000,
   accessible: 0,
@@ -57,9 +52,7 @@ const WALK_ADVISORY_THRESHOLD_METERS = 300;
 // Boarding a train/bus at a highly (or moderately) crowded platform is
 // modelled as extra "cost" on top of the plain time-of-day wait, so the
 // live route can choose to board a line one stop earlier/later or take a
-// different line altogether when doing so avoids the worst crowding - the
-// same mechanism disruption-avoidance already uses (extra minutes bias the
-// optimizer), just triggered by crowding instead of an outage.
+// different line altogether when doing so avoids the worst crowding
 const CROWDING_BOARDING_PENALTY_MINUTES: Record<CrowdLevelDto, number> = {
   high: 5,
   moderate: 1.5,
@@ -69,9 +62,7 @@ const CROWDING_BOARDING_PENALTY_MINUTES: Record<CrowdLevelDto, number> = {
 const EMPTY_BUS_GRAPH: BusGraph = { stops: new Map(), edges: [], builtAt: 0 };
 
 // A commuter facing a disruption is being offered a choice between new
-// optimal routes, not "old route vs new route" - this many ranked,
-// meaningfully distinct disruption-aware alternatives are computed and
-// returned for them to pick between (see RerouteSuggestionDto.routes).
+// optimal routes, not "old route vs new route"
 const MAX_ROUTE_OPTIONS = 3;
 
 export interface SuggestOptions {
@@ -91,8 +82,7 @@ export interface SuggestOptions {
   crowding?: Map<string, CrowdLevelDto>;
   // When the traveller plans to depart - drives the time-of-day speed
   // adjustment (rush-hour buses slower, night buses/trains faster or
-  // slower per src/routing/timeOfDay.ts). Defaults to right now, same as
-  // Google Maps' "leave now".
+  // slower per src/routing/timeOfDay.ts). Defaults to right now
   departAt?: Date;
 }
 
@@ -145,12 +135,36 @@ function bfsPath(adjacency: Map<string, StationEdge[]>, start: string, goal: str
   return [];
 }
 
+/**
+ * Maps whatever LTA (or a fixture) calls a line onto the graph's line code.
+ * LTA's TrainServiceAlerts publishes bare codes ("EWL"), while the original
+ * matcher only understood full names ("EAST-WEST LINE"), so real alerts
+ * blocked nothing. Accepts both, case/spacing/hyphen-insensitive.
+ */
+export function normalizeLineCode(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const squash = (v: string) => v.toUpperCase().replace(/[^A-Z]/g, "");
+  const needle = squash(raw);
+  if (LINE_FULL_NAMES[raw.trim().toUpperCase()]) return raw.trim().toUpperCase();
+  for (const [code, full] of Object.entries(LINE_FULL_NAMES)) {
+    if (needle === code || needle.includes(squash(full))) return code;
+  }
+  return null;
+}
+
+/** An alert station token may be a name ("Buona Vista"), or a station code ("EW21"). */
+function tokenMatchesStation(token: string, code: string): boolean {
+  const t = token.trim().toUpperCase();
+  return t === code.toUpperCase() || t.includes(stationName(code).toUpperCase());
+}
+
 function edgesAvoidingDisruptedLines(alerts: TrainAlertsDto): {
   edges: StationEdge[];
   blockedLines: string[];
+  blockedEdgeKeys: Set<string>;
 } {
   const disruptedLines = alerts.lines.filter((l) => l.status === "disrupted");
-  if (disruptedLines.length === 0) return { edges: EDGES, blockedLines: [] };
+  if (disruptedLines.length === 0) return { edges: EDGES, blockedLines: [], blockedEdgeKeys: new Set() };
 
   const blockedLines: string[] = [];
   const blockedEdgeKeys = new Set<string>();
@@ -166,9 +180,8 @@ function edgesAvoidingDisruptedLines(alerts: TrainAlertsDto): {
   };
 
   for (const matching of disruptedLines) {
-    const lineEdges = EDGES.filter((e) =>
-      matching.line.toUpperCase().includes(edgeLineFullName(e.line))
-    );
+    const matchedCode = normalizeLineCode(matching.lineCode) ?? normalizeLineCode(matching.line);
+    const lineEdges = EDGES.filter((e) => e.line === matchedCode);
     if (lineEdges.length === 0) continue;
 
     const namedStations = matching.affectedStations.map((s) => s.toUpperCase());
@@ -185,29 +198,32 @@ function edgesAvoidingDisruptedLines(alerts: TrainAlertsDto): {
       codesOnLine.add(e.to);
     }
     const namedCodes = [...codesOnLine].filter((code) =>
-      namedStations.some((s) => s.includes(stationName(code).toUpperCase()))
+      namedStations.some((s) => tokenMatchesStation(s, code))
     );
 
+    // Fail safe: LTA told us this line is disrupted but we could not place
+    // ANY of the named stations on our graph (secondary interchange codes,
+    // renamed stations). Ignoring the alert would send commuters straight
+    // into the incident, so block the whole line instead.
+    if (namedCodes.length === 0) {
+      blockEdges(lineEdges);
+      continue;
+    }
+
     if (namedCodes.length < 2) {
-      // Fewer than two named stations on this line means there's no span to
-      // compute - fall back to the conservative "both endpoints named" rule
-      // (in practice this blocks nothing, since an edge needs two named
-      // endpoints and we only have zero or one).
+      // Fewer than two named stations on this line means there's no span to compute
       blockEdges(
         lineEdges.filter(
           (e) =>
-            namedStations.some((s) => s.includes(stationName(e.from).toUpperCase())) &&
-            namedStations.some((s) => s.includes(stationName(e.to).toUpperCase()))
+            namedStations.some((s) => tokenMatchesStation(s, e.from)) &&
+            namedStations.some((s) => tokenMatchesStation(s, e.to))
         )
       );
       continue;
     }
 
     // Block every edge on the path between any two named stations, not just
-    // edges whose own two endpoints happen to both be named - an alert that
-    // names only the two ends of a disrupted stretch (e.g. "Clementi and
-    // Commonwealth") still fully blocks the stations in between (e.g.
-    // Dover) that it never mentions by name.
+    // edges whose own two endpoints happen to both be named
     const adjacency = new Map<string, StationEdge[]>();
     for (const e of lineEdges) {
       if (!adjacency.has(e.from)) adjacency.set(e.from, []);
@@ -221,13 +237,12 @@ function edgesAvoidingDisruptedLines(alerts: TrainAlertsDto): {
   }
 
   const edges = EDGES.filter((edge) => !blockedEdgeKeys.has(edgeKey(edge)));
-  return { edges, blockedLines };
+  return { edges, blockedLines, blockedEdgeKeys };
 }
 
 // Exported so mockDisruptions.ts's networkWideOutage scenario can build
 // alert.line values edgesAvoidingDisruptedLines will actually match,
-// instead of duplicating this mapping (and risking it drifting out of
-// sync, as happened when that scenario used bare line codes instead).
+// instead of duplicating this mapping 
 export const LINE_FULL_NAMES: Record<string, string> = {
   NSL: "NORTH-SOUTH",
   EWL: "EAST-WEST",
@@ -236,10 +251,6 @@ export const LINE_FULL_NAMES: Record<string, string> = {
   TEL: "THOMSON-EAST COAST",
   NEL: "NORTH EAST",
 };
-
-function edgeLineFullName(code: string): string {
-  return LINE_FULL_NAMES[code] ?? code;
-}
 
 /** A resolved endpoint: either a real station/bus stop, or an arbitrary point that walks in to one or more nearby nodes. */
 type ResolvedEndpoint =
@@ -365,9 +376,7 @@ function sumWalkDistanceMeters(
 /**
  * Turns the raw hop-by-hop path into a rider-facing itinerary: one step per
  * mode change (board/alight/interchange), not one step per physical stop.
- * A bus leg alone can cover 20-30 real stops - listing each one would be
- * unreadable, so consecutive same-line hops collapse into a single "ride"
- * step summarising the stop count and time.
+ * A bus leg alone can cover 20-30 real stops
  */
 function buildSteps(
   result: PathResult,
@@ -426,10 +435,7 @@ function buildSteps(
 
     if (i === last) {
       mode = "destination";
-      // Keep the ride/walk description rather than replacing it outright -
-      // when there's no interchange at all (a single train/bus leg door to
-      // door), this is the ONLY step carrying that info, so overwriting it
-      // with a bare "Destination" silently erased the entire journey detail.
+      // Keep the ride/walk description rather than replacing it outright
       note = isWalk
         ? `Destination (walk ~${distanceMeters}m, ${segmentMinutes} min)`
         : isCycle
@@ -451,11 +457,7 @@ function buildSteps(
  * straight line between them already tracks the real line closely. Bus
  * stops on the other hand can be far apart (e.g. either side of an
  * expressway interchange), where the actual route loops around on-ramps
- * rather than cutting straight across - hence bus hops get the same
- * road-following treatment as walk/cycle (see fetchWalkCycleGeometry's own
- * comment for why this only affects display, never the route's timing).
- * Hops are fetched in parallel since a route rarely has more than a
- * handful of these legs.
+ * rather than cutting straight across
  */
 async function pathCoordinatesWithRoadGeometry(
   result: PathResult,
@@ -491,6 +493,13 @@ async function pathCoordinatesWithRoadGeometry(
 interface RouteOptionContext {
   usual: PathResult;
   blockedLines: string[];
+  // True only if the "usual" route actually rides a blocked hop. Without this
+  // an unrelated disruption + any crowding penalty was reported as
+  // "Avoiding disruption on the X line" for a trip that never touched X.
+  usualHitsDisruption: boolean;
+  // True when the disruption-aware graph had NO route at all and we fell back
+  // to the usual (blocked) one. Must not be presented as "avoiding" anything.
+  noAlternative: boolean;
   origin: ResolvedEndpoint;
   destination: ResolvedEndpoint;
   busGraph: BusGraph;
@@ -504,17 +513,14 @@ interface RouteOptionContext {
 /**
  * Builds one fully-described, selectable route (steps, road-following
  * polyline, disruption/crowding explanations, warnings) out of a single
- * PathResult - the same derivation the planner used to run once for "the"
- * route, now run once per ranked alternative so each option in
- * RerouteSuggestionDto.routes is independently explorable rather than only
- * the top one.
+ * PathResult
  */
 async function buildRouteOption(id: string, live: PathResult, ctx: RouteOptionContext): Promise<RouteOptionDto> {
-  const { usual, blockedLines, origin, destination, busGraph, crowding, persona, liftOutages, originWeather, destinationWeather } = ctx;
+  const { usual, blockedLines, usualHitsDisruption, noAlternative, origin, destination, busGraph, crowding, persona, liftOutages, originWeather, destinationWeather } = ctx;
 
   const trainLinesUsed = new Set(live.linesUsed.filter((l) => l !== "WALK" && l !== "CYCLE"));
   const transfers = Math.max(0, trainLinesUsed.size - 1);
-  const disrupted = blockedLines.length > 0 && live.totalMinutes !== usual.totalMinutes;
+  const disrupted = blockedLines.length > 0 && usualHitsDisruption;
 
   const roundedTotalMinutes = Math.round(live.totalMinutes * 10) / 10;
   const bufferMinutes = Math.max(1, Math.round(roundedTotalMinutes * 0.15));
@@ -588,7 +594,9 @@ async function buildRouteOption(id: string, live: PathResult, ctx: RouteOptionCo
     confidenceRangeMinutes,
     transfers,
     disruptionReason: disrupted
-      ? `Avoiding disruption on the ${blockedLines.join(", ")} line${blockedLines.length > 1 ? "s" : ""}`
+      ? noAlternative
+        ? `No alternative found: your usual route is affected by disruption on the ${blockedLines.join(", ")} line${blockedLines.length > 1 ? "s" : ""}. Expect delays.`
+        : `Avoiding disruption on the ${blockedLines.join(", ")} line${blockedLines.length > 1 ? "s" : ""}`
       : null,
     crowdingReason,
     steps: buildSteps(live, origin, destination, busGraph),
@@ -597,6 +605,13 @@ async function buildRouteOption(id: string, live: PathResult, ctx: RouteOptionCo
     weatherAdvisory,
     accessibilityWarnings,
   };
+}
+
+/** Removes the crowding ranking cost from a path's boarding waits and total. */
+function withoutCrowdingCost(result: PathResult, penaltyAt: (station: string) => number): PathResult {
+  const waitMinutes = result.waitMinutes.map((wait, i) => (wait > 0 ? Math.max(0, wait - penaltyAt(result.path[i])) : 0));
+  const removed = result.waitMinutes.reduce((sum, wait, i) => sum + wait - waitMinutes[i], 0);
+  return { ...result, waitMinutes, totalMinutes: result.totalMinutes - removed };
 }
 
 export class StaticGraphRoutePlanner implements RoutePlanner {
@@ -644,11 +659,7 @@ export class StaticGraphRoutePlanner implements RoutePlanner {
     const serviceAvailability = getServiceAvailability(departAt);
 
     // A closed mode isn't "disrupted" (that's the alerts-driven live-vs-usual
-    // comparison below) - it's simply not part of the graph at this hour, so
-    // both the "usual" and "live" paths are computed against the same
-    // hours-filtered edge set. Regular bus edges only (not the walk-transfer
-    // edges busGraph.ts also stores in the same array) are dropped when
-    // buses aren't running.
+    // comparison below)
     const scheduledBusGraphEdges = serviceAvailability.busOpen
       ? busGraph.edges
       : busGraph.edges.filter((e) => !e.line.startsWith("BUS:"));
@@ -663,11 +674,7 @@ export class StaticGraphRoutePlanner implements RoutePlanner {
     const originNode = endpointGraphNode(origin);
     const destNode = endpointGraphNode(destination);
 
-    // "usual" reflects only the time-of-day wait, no crowding/disruption
-    // avoidance - it's the plain baseline the live route is compared
-    // against. "live" layers a crowding penalty on top, so boarding at a
-    // highly-crowded platform costs extra minutes and the optimizer can
-    // choose a different line/station when that's worth it.
+    // "usual" reflects only the time-of-day wait, no crowding/disruption avoidance
     const usualBoardingPenalty = (line: string) => boardingWaitMinutes(line, timePeriod);
     const crowding = options.crowding;
     const crowdingPenaltyFor = (atStation: string): number => {
@@ -684,7 +691,7 @@ export class StaticGraphRoutePlanner implements RoutePlanner {
       return { error: `No route found between these points across the rail and bus network.${hint}` };
     }
 
-    const { edges: liveRailEdgesRaw, blockedLines } = edgesAvoidingDisruptedLines(alerts);
+    const { edges: liveRailEdgesRaw, blockedLines, blockedEdgeKeys } = edgesAvoidingDisruptedLines(alerts);
     const liveRailEdges = serviceAvailability.railOpen ? liveRailEdgesRaw : [];
     const liveEdges = scaleEdgesForTime(
       [...liveRailEdges, ...scheduledBusGraphEdges, ...originWalkEdges, ...destWalkEdges],
@@ -693,17 +700,19 @@ export class StaticGraphRoutePlanner implements RoutePlanner {
     // A disrupted commuter is choosing between several *new* optimal
     // routes, not between the old route and one new one - so this finds up
     // to MAX_ROUTE_OPTIONS distinct, ranked (fastest-first) routes on the
-    // disruption-aware graph via Yen's algorithm, instead of a single
-    // shortestPath call. "usual" (above) remains a single baseline path,
-    // kept only as shared context (usualMinutes/deltaMinutes/
-    // avoidedSegments per option) - it is never itself one of the choices
-    // offered.
+    // disruption-aware graph via Yen's algorithm.
     const liveCandidates = kShortestPaths(liveEdges, originNode, destNode, MAX_ROUTE_OPTIONS, liveBoardingPenalty);
-    const liveResults = liveCandidates.length > 0 ? liveCandidates : [usual];
+    // Crowding only steers the ranking; it is not time the commuter spends, so
+    // it is removed from the minutes that get displayed.
+    const liveResults = (liveCandidates.length > 0 ? liveCandidates : [usual]).map((r) =>
+      withoutCrowdingCost(r, crowdingPenaltyFor)
+    );
 
     const routeOptionContext: RouteOptionContext = {
       usual,
       blockedLines,
+      noAlternative: liveCandidates.length === 0,
+      usualHitsDisruption: usual.linesUsed.some((line, i) => blockedEdgeKeys.has(`${line}|${usual.path[i]}|${usual.path[i + 1]}`)),
       origin,
       destination,
       busGraph,
@@ -727,6 +736,7 @@ export class StaticGraphRoutePlanner implements RoutePlanner {
       persona,
       timeContext: { period: timePeriod, label: TIME_PERIOD_LABELS[timePeriod] },
       serviceHoursNote: serviceAvailability.note,
+      disruptionDataStatus: alerts.dataStatus ?? "live",
       totalMinutes: best.totalMinutes,
       usualMinutes: Math.round(usual.totalMinutes * 10) / 10,
       deltaMinutes: best.deltaMinutes,

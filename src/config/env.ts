@@ -17,9 +17,7 @@ export const env = {
     "https://datamall2.mytransport.sg/ltaodataservice"
   ),
   // Opt-in switch for the /api/reroute `mockDisruption` param (see
-  // src/services/mockDisruptions.ts) - off by default so a real deployment
-  // can't have its disruption data spoofed by a caller; flip it on locally
-  // to demo the reroute engine's disruption handling on demand.
+  // src/services/mockDisruptions.ts) - off by default
   enableMockDisruptions: process.env.ENABLE_MOCK_DISRUPTIONS === "true",
 };
 

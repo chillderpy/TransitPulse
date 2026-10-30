@@ -24,17 +24,13 @@ export function createApp() {
       // The dev UI renders a Protomaps vector basemap (via protomaps-leaflet),
       // read with fetch()/Range requests proxied through our own
       // /api/basemap route (see src/routes/basemap.ts) rather than straight
-      // from Protomaps' PMTiles build server - that host never sends CORS
-      // headers, so a direct browser fetch is blocked everywhere regardless
-      // of network. Proxying keeps this same-origin, so 'self' already
-      // covers it under connect-src.
+      // from Protomaps' PMTiles build server
       contentSecurityPolicy: {
         useDefaults: true,
         directives: {
           // app.js falls back to OpenStreetMap's raster tiles (loaded as
           // plain <img> tiles by Leaflet) if even the proxied basemap can't
-          // be reached, so img-src needs that host too - otherwise the CSP
-          // silently blocks the fallback tiles and the map is just blank.
+          // be reached, so img-src needs that host too
           "img-src": ["'self'", "data:", "https://*.tile.openstreetmap.org"],
           // Helmet's defaults include upgrade-insecure-requests, which tells
           // the browser to silently rewrite every subresource request (CSS,
@@ -64,9 +60,7 @@ export function createApp() {
   app.use("/api/notifications", notificationsRouter);
   app.use("/api/basemap", basemapRouter);
 
-  // Minimal HTML/CSS/JS dev UI for poking at the API by hand - not the
-  // Flutter app, just something to click around in without curl. See
-  // public/app.js.
+  // Minimal HTML/CSS/JS dev UI for poking at the API by hand
   app.use(express.static(path.join(__dirname, "../public")));
 
   app.use(notFoundHandler);
