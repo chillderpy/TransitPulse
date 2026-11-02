@@ -77,6 +77,7 @@ endpoint below.
 |---|---|---|
 | `GET /health` | - | liveness, whether an LTA key is configured, and whether mock-disruption demo scenarios are enabled |
 | `GET /api/arrivals/bus/:busStopCode?serviceNo=` | LTA Bus Arrival | real per-bus ETA, load, wheelchair access |
+| `GET /api/arrivals/nearby?lat=&lon=&radius=500&limit=5` | LTA Bus Stops (cached) | bus stops near a GPS position, nearest first with distance and walk time; 400 if outside Singapore |
 | `GET /api/train-alerts` | LTA Train Service Alerts | current disruption status per line |
 | `GET /api/crowding?trainLine=NSL&station=Jurong+East` | LTA PCDRealTime + PCDForecast + our own reports | live level, forecast, and any active crowdsourced reports for that station |
 | `POST /api/crowding/report` `{station, level}` | ours | crowdsourced report, expires after 15 min |

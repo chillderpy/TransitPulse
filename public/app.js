@@ -121,6 +121,28 @@ map.on("click", (e) => {
   setPicking(null);
 });
 
+// Fill the origin with the device's GPS position. The backend already accepts
+// a "lat,lon" origin (and rejects one outside Singapore), so this only has to
+// produce that string and drop the same draggable pin the map picker uses.
+document.getElementById("locate-origin").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  const el = document.getElementById("result-reroute");
+  btn.disabled = true;
+  el.textContent = "Finding your location…";
+  try {
+    const pos = await getCurrentPosition();
+    const { latitude, longitude } = pos.coords;
+    document.getElementById("input-origin").value = formatCoordinate(latitude, longitude);
+    placePickMarker("origin", latitude, longitude);
+    setViewAvoidingPanel([latitude, longitude], 16);
+    el.innerHTML = `<div class="hint">Origin set to your current location. Drag the pin to adjust it.</div>`;
+  } catch (err) {
+    el.innerHTML = `<div class="error">${escapeHtml(geolocationErrorMessage(err))}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 document.getElementById("pick-origin").addEventListener("click", () => setPicking("origin"));
 document.getElementById("pick-destination").addEventListener("click", () => setPicking("destination"));
 
@@ -695,16 +717,13 @@ document.getElementById("form-reroute").addEventListener("submit", (e) => {
 });
 
 // ==================== bus arrivals ====================
-document.getElementById("form-arrivals").addEventListener("submit", async (e) => {
-  e.preventDefault();
+async function loadBusArrivals(busStopCode, serviceNo) {
   const el = document.getElementById("result-arrivals");
   el.textContent = "Loading…";
   busLayer.clearLayers();
-  const form = new FormData(e.target);
-  const serviceNo = form.get("serviceNo");
   const query = serviceNo ? `?serviceNo=${encodeURIComponent(serviceNo)}` : "";
   try {
-    const data = await callApi(`/api/arrivals/bus/${encodeURIComponent(form.get("busStopCode"))}${query}`);
+    const data = await callApi(`/api/arrivals/bus/${encodeURIComponent(busStopCode)}${query}`);
     if (data.services.length === 0) {
       el.innerHTML = `<div class="hint">No services reported at this stop right now.</div>`;
       return;
@@ -753,6 +772,119 @@ document.getElementById("form-arrivals").addEventListener("submit", async (e) =>
     } else {
       showError(el, err);
     }
+  }
+}
+
+document.getElementById("form-arrivals").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const form = new FormData(e.target);
+  selectNearbyStopCard(null);
+  loadBusArrivals(form.get("busStopCode"), form.get("serviceNo"));
+});
+
+// ---------- nearby bus stops via GPS ----------
+const nearbyLayer = L.layerGroup().addTo(map);
+
+function getCurrentPosition() {
+  return new Promise((resolve, reject) => {
+    if (!("geolocation" in navigator)) {
+      reject(new Error("Your browser doesn't support location access. Enter a bus stop code instead."));
+      return;
+    }
+    // Browsers only expose geolocation on https:// or localhost
+    if (!window.isSecureContext) {
+      reject(new Error("Location needs a secure (https) connection. Open this page over https, or enter a bus stop code instead."));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 30000,
+    });
+  });
+}
+
+function geolocationErrorMessage(err) {
+  // GeolocationPositionError codes: 1 denied, 2 unavailable, 3 timeout
+  if (err && err.code === 1) return "Location permission was denied. Allow location access for this site, or enter a bus stop code instead.";
+  if (err && err.code === 2) return "Couldn't work out your location. Try again, or enter a bus stop code instead.";
+  if (err && err.code === 3) return "Finding your location timed out. Try again, or enter a bus stop code instead.";
+  return userFacingMessage(err && err.message) || "Couldn't get your location.";
+}
+
+function selectNearbyStopCard(code) {
+  document.querySelectorAll("#result-nearby .nearby-stop").forEach((btn) => {
+    btn.classList.toggle("selected", btn.dataset.code === code);
+  });
+}
+
+function selectNearbyStop(stop) {
+  selectNearbyStopCard(stop.busStopCode);
+  document.querySelector('#form-arrivals input[name="busStopCode"]').value = stop.busStopCode;
+  const serviceNo = document.querySelector('#form-arrivals input[name="serviceNo"]').value;
+  loadBusArrivals(stop.busStopCode, serviceNo);
+}
+
+function renderNearbyStops(el, data) {
+  nearbyLayer.clearLayers();
+  const here = [data.origin.latitude, data.origin.longitude];
+  L.circleMarker(here, { radius: 8, color: "#fff", weight: 2, fillColor: "#3b82f6", fillOpacity: 1 })
+    .bindPopup("You are here")
+    .addTo(nearbyLayer);
+
+  if (data.stops.length === 0) {
+    el.innerHTML = `<div class="hint">No bus stops within ${data.radiusMeters} m. Try a larger search radius.</div>`;
+    setViewAvoidingPanel(here, 16);
+    return;
+  }
+
+  el.innerHTML = `<ul class="nearby-list">${data.stops
+    .map(
+      (s) => `<li><button type="button" class="nearby-stop" data-code="${escapeHtml(s.busStopCode)}">
+        <span><b>${escapeHtml(s.description)}</b><div class="meta">${escapeHtml(s.roadName)} · ${escapeHtml(s.busStopCode)}</div></span>
+        <span class="dist">${s.distanceMeters} m · ${s.walkMinutes} min walk</span>
+      </button></li>`
+    )
+    .join("")}</ul>`;
+
+  data.stops.forEach((stop) => {
+    const marker = L.marker([stop.latitude, stop.longitude], { icon: stationIcon("bus-dot", 14) })
+      .bindPopup(`<b>${escapeHtml(stop.description)}</b><div class="hint">${escapeHtml(stop.busStopCode)} · ${stop.distanceMeters} m</div>`)
+      .addTo(nearbyLayer);
+    marker.on("click", () => selectNearbyStop(stop));
+  });
+  el.querySelectorAll(".nearby-stop").forEach((btn, i) => {
+    btn.addEventListener("click", () => selectNearbyStop(data.stops[i]));
+  });
+
+  const bounds = L.latLngBounds([here, ...data.stops.map((s) => [s.latitude, s.longitude])]);
+  // Zero-area bounds break fitBounds with this panel's padding (see above)
+  if (bounds.getNorthEast().equals(bounds.getSouthWest())) setViewAvoidingPanel(here, 16);
+  else fitBoundsAvoidingPanel(bounds);
+}
+
+document.getElementById("btn-nearby").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  const el = document.getElementById("result-nearby");
+  btn.disabled = true;
+  el.textContent = "Finding your location…";
+  try {
+    const pos = await getCurrentPosition();
+    const radius = document.getElementById("nearby-radius").value;
+    el.textContent = "Looking for nearby bus stops…";
+    const { latitude, longitude } = pos.coords;
+    const data = await callApi(`/api/arrivals/nearby?lat=${latitude}&lon=${longitude}&radius=${radius}&limit=5`);
+    renderNearbyStops(el, data);
+    // Recommend the closest stop straight away: show its arrivals
+    if (data.stops.length > 0) selectNearbyStop(data.stops[0]);
+  } catch (err) {
+    if (isNetworkError(err)) {
+      showOfflineMessage(el, "You're offline — can't look up nearby bus stops right now.");
+    } else {
+      el.innerHTML = `<div class="error">${escapeHtml(geolocationErrorMessage(err))}</div>`;
+    }
+  } finally {
+    btn.disabled = false;
   }
 });
 
