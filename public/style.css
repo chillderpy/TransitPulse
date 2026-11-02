@@ -608,3 +608,23 @@ dialog .col { margin-bottom: 0; }
 @media (max-width: 900px) and (max-height: 450px) and (orientation: landscape) {
   .overlay-panel { max-height: 85dvh; width: 340px; }
 }
+
+/* nearby bus stops (GPS) */
+.nearby-list { list-style: none; padding: 0; margin: 8px 0 12px; display: flex; flex-direction: column; gap: 6px; }
+.nearby-stop {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.nearby-stop:hover, .nearby-stop.selected { border-color: var(--accent); background: var(--accent-soft); }
+.nearby-stop .meta { color: var(--muted); font-size: 12px; }
+.nearby-stop .dist { white-space: nowrap; font-size: 12px; color: var(--accent); }

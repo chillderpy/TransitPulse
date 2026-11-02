@@ -16,6 +16,22 @@ export interface BusArrivalDto {
   fetchedAt: string;
 }
 
+export interface NearbyBusStopDto {
+  busStopCode: string;
+  description: string;
+  roadName: string;
+  latitude: number;
+  longitude: number;
+  distanceMeters: number; // straight-line distance from the caller's position
+  walkMinutes: number; // rough walking time at the planner's average pace
+}
+
+export interface NearbyBusStopsDto {
+  origin: { latitude: number; longitude: number };
+  radiusMeters: number;
+  stops: NearbyBusStopDto[]; // nearest first
+}
+
 export type DisruptionStatus = "normal" | "disrupted";
 
 export interface LineDisruptionDto {

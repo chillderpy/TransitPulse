@@ -38,11 +38,12 @@
     <main>
       <!-- Reroute -->
       <section class="panel active" id="panel-reroute">
-        <p class="hint">Click stations on the map to fill origin/destination, type a station name, enter a door-to-door point as "lat,lon" (e.g. 1.3335,103.7430), or use "Pick on map" and click anywhere.</p>
+        <p class="hint">Click stations on the map to fill origin/destination, type a station name, enter a door-to-door point as "lat,lon" (e.g. 1.3335,103.7430), use "Pick on map" and click anywhere, or tap 🎯 to start from your current location.</p>
         <form id="form-reroute" class="col">
           <label>Origin
             <div class="input-with-button">
               <input name="origin" id="input-origin" value="Jurong East" required />
+              <button type="button" class="pick-btn" id="locate-origin" title="Use my current location as origin" aria-label="Use my current location as origin">🎯</button>
               <button type="button" class="pick-btn" id="pick-origin" title="Pick origin by clicking the map" aria-label="Pick origin by clicking the map">📍</button>
             </div>
           </label>
@@ -84,7 +85,19 @@
 
       <!-- Bus arrivals -->
       <section class="panel" id="panel-arrivals">
-        <p class="hint">Enter a bus stop code to see live arrival times, e.g. 83139. Live buses (when reported) are plotted on the map.</p>
+        <p class="hint">Find bus stops near you using your location, or enter a bus stop code below. Live buses (when reported) are plotted on the map.</p>
+        <div class="col">
+          <label>Search radius
+            <select id="nearby-radius">
+              <option value="300">300 m</option>
+              <option value="500" selected>500 m</option>
+              <option value="1000">1 km</option>
+            </select>
+          </label>
+          <button type="button" id="btn-nearby">Find bus stops near me</button>
+        </div>
+        <div id="result-nearby" class="result" role="status" aria-live="polite"></div>
+        <p class="hint">Or enter a bus stop code, e.g. 83139:</p>
         <form id="form-arrivals" class="col">
           <label>Bus stop code <input name="busStopCode" placeholder="83139" pattern="\d{5}" required /></label>
           <label>Service no (optional) <input name="serviceNo" placeholder="15" /></label>
