@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: transitpulse-backend
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: LTA_ACCOUNT_KEY
+        sync: false
+      - key: CORS_ORIGIN
+        value: "*"
+      - key: ENABLE_MOCK_DISRUPTIONS
+        value: "false"
